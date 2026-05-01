@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   STORAGE — localStorage simulates user DB (swap with Firebase for global sync)
+───────────────────────────────────────────────────────────────────────────── */
 const DB_KEY = "quizrupee_db_v3";
 const SESSION_KEY = "quizrupee_session_v3";
 const loadDB = () => { try { return JSON.parse(localStorage.getItem(DB_KEY)) || { users: {} }; } catch { return { users: {} }; } };
@@ -8,6 +11,9 @@ const loadSession = () => { try { return JSON.parse(localStorage.getItem(SESSION
 const saveSession = (uid) => { try { localStorage.setItem(SESSION_KEY, JSON.stringify(uid)); } catch {} };
 const clearSession = () => { try { localStorage.removeItem(SESSION_KEY); } catch {} };
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   CONSTANTS
+───────────────────────────────────────────────────────────────────────────── */
 const CATEGORIES = [
   { id: "sports",        label: "Sports",        icon: "⚽", color: "#FF6B35" },
   { id: "entertainment", label: "Entertainment",  icon: "🎬", color: "#A855F7" },
@@ -34,7 +40,11 @@ const CAT_DESC = {
   animals:       "animal facts, habitats, food chains, pets, wildlife, endangered species, animal behaviors",
 };
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+/* ─────────────────────────────────────────────────────────────────────────────
+   GEMINI API — FREE, no credit card needed
+   Get your key at: aistudio.google.com → Get API Key (sign in with Gmail)
+───────────────────────────────────────────────────────────────────────────── */
+const GEMINI_API_KEY = AIzaSyDLmkt_w-ZgP89bg7nW5u6p446_pyzy1tg; // ← paste your key here
 
 const generateQuestions = async (categoryId) => {
   const seed = Math.floor(Math.random() * 999999);
@@ -76,6 +86,7 @@ Exactly 10 items. Nothing else.`;
 
   const raw = JSON.parse(text);
 
+  // Shuffle options so correct answer isn't always first in the UI
   return raw.slice(0, 10).map((q) => {
     const opts = (q.options || q.answers || []).map((t, i) => ({
       text: typeof t === "string" ? t : t.text || t,
@@ -89,6 +100,9 @@ Exactly 10 items. Nothing else.`;
   });
 };
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   SMALL COMPONENTS
+───────────────────────────────────────────────────────────────────────────── */
 const BannerAd = ({ pos }) => (
   <div style={{ width: "100%", height: 46, background: "linear-gradient(90deg,#09090f,#10102a,#09090f)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, borderTop: pos === "bottom" ? "1px solid #1a1a30" : "none", borderBottom: pos === "top" ? "1px solid #1a1a30" : "none", flexShrink: 0 }}>
     <span style={{ fontSize: 13 }}>📢</span>
@@ -128,31 +142,41 @@ function Field({ label, type = "text", placeholder, value, onChange, onEnter }) 
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   MAIN APP
+───────────────────────────────────────────────────────────────────────────── */
 export default function App() {
+  /* ── auth ── */
   const [uid, setUid] = useState(() => loadSession());
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [authErr, setAuthErr] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
+  /* ── navigation ── */
   const [page, setPage] = useState("dashboard");
 
+  /* ── quiz ── */
   const [quiz, setQuiz] = useState(null);
   const [result, setResult] = useState(null);
   const [loadingQ, setLoadingQ] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [switchWarn, setSwitchWarn] = useState(false);
 
+  /* ── rewards ── */
   const [upi, setUpi] = useState("");
   const [wdMsg, setWdMsg] = useState("");
 
+  /* ── leaderboard ── */
   const [lbTab, setLbTab] = useState("overall");
   const [lbCat, setLbCat] = useState("sports");
 
+  /* ── derived ── */
   const getProfile = () => uid ? loadDB().users[uid] : null;
   const profile = getProfile();
   const balance = profile ? +((profile.totalEarned || 0) - (profile.withdrawn || 0)).toFixed(2) : 0;
 
+  /* ── tab switch guard ── */
   useEffect(() => {
     if (!quiz) return;
     const onHide = () => { if (document.hidden) { setSwitchWarn(true); setQuiz(null); } };
@@ -162,6 +186,7 @@ export default function App() {
     return () => { document.removeEventListener("visibilitychange", onHide); window.removeEventListener("blur", onBlur); };
   }, [quiz]);
 
+  /* ── auth handlers ── */
   const handleAuth = async () => {
     setAuthErr(""); setAuthBusy(true);
     const db = loadDB();
@@ -183,9 +208,10 @@ export default function App() {
 
   const logout = () => { clearSession(); setUid(null); setPage("dashboard"); setQuiz(null); setResult(null); };
 
+  /* ── quiz handlers ── */
   const startQuiz = async (catId) => {
-    if (!GEMINI_API_KEY) {
-      setLoadErr("Gemini API key not found. Please add VITE_GEMINI_API_KEY to your Secrets tab.");
+    if (GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
+      setLoadErr("Please add your free Gemini API key. Get it at aistudio.google.com");
       setPage("menu"); return;
     }
     setLoadErr(""); setLoadingQ(true); setResult(null); setPage("quiz");
@@ -225,6 +251,7 @@ export default function App() {
     }
   };
 
+  /* ── withdrawal ── */
   const doWithdraw = () => {
     if (balance < 100) return setWdMsg("You need at least ₹100 to withdraw.");
     if (!upi.trim()) return setWdMsg("Please enter your UPI ID.");
@@ -233,6 +260,7 @@ export default function App() {
     setWdMsg(`✅ ₹${amt} withdrawal requested to ${upi}`); setUpi("");
   };
 
+  /* ── leaderboard ── */
   const getLB = () => {
     const users = Object.values(loadDB().users);
     return {
@@ -246,6 +274,9 @@ export default function App() {
     };
   };
 
+  /* ═══════════════════════════════════════════════════════════════════════════
+     AUTH SCREEN
+  ═══════════════════════════════════════════════════════════════════════════ */
   if (!uid) return (
     <div style={{ minHeight: "100vh", background: "#07070e", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Nunito', sans-serif" }}>
       <style>{`
@@ -300,6 +331,9 @@ export default function App() {
     </div>
   );
 
+  /* ═══════════════════════════════════════════════════════════════════════════
+     MAIN APP SHELL
+  ═══════════════════════════════════════════════════════════════════════════ */
   const p = getProfile();
   const lb = getLB();
 
@@ -333,6 +367,7 @@ export default function App() {
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 68 }}>
 
+        {/* ══ DASHBOARD ══════════════════════════════════════════════════════ */}
         {page === "dashboard" && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
@@ -387,10 +422,18 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ QUIZ MENU ═══════════════════════════════════════════════════════ */}
         {page === "menu" && !quiz && !result && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
             <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#e94560", marginBottom: 4 }}>Choose Category</div>
             <div style={{ fontSize: 12, color: "#333", marginBottom: 6 }}>Gemini AI generates fresh questions every round</div>
+
+            {GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE" && (
+              <div style={{ background: "rgba(245,158,11,.1)", border: "1px solid #f59e0b33", borderRadius: 12, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: "#f59e0b", fontWeight: 700, lineHeight: 1.6 }}>
+                ⚠️ Add your free Gemini API key!<br/>
+                <span style={{ fontSize: 11, color: "#8a6a20", fontWeight: 600 }}>Open the code → find GEMINI_API_KEY → replace with your key from aistudio.google.com</span>
+              </div>
+            )}
 
             {loadErr && <div style={{ background: "rgba(239,68,68,.1)", border: "1px solid #ef444430", borderRadius: 12, padding: "11px 14px", marginBottom: 14, fontSize: 13, color: "#ef4444", fontWeight: 700 }}>⚠️ {loadErr}</div>}
 
@@ -417,6 +460,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ LOADING ═════════════════════════════════════════════════════════ */}
         {page === "quiz" && loadingQ && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, padding: 40 }}>
             <div style={{ width: 46, height: 46, border: "4px solid #181828", borderTopColor: "#e94560", borderRadius: "50%", animation: "spin 1s linear infinite", marginBottom: 20 }} />
@@ -425,6 +469,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ ACTIVE QUIZ ═════════════════════════════════════════════════════ */}
         {page === "quiz" && quiz && !loadingQ && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .3s ease" }}>
             {(() => {
@@ -460,6 +505,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ RESULT ══════════════════════════════════════════════════════════ */}
         {result && page === "quiz" && (
           <div style={{ padding: "30px 15px", textAlign: "center", animation: "pop .4s ease" }}>
             <div style={{ fontSize: 66, marginBottom: 12 }}>{result.score >= 8 ? "🏆" : result.score >= 5 ? "⭐" : "💪"}</div>
@@ -481,6 +527,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ REWARDS ══════════════════════════════════════════════════════════ */}
         {page === "rewards" && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
             <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#f59e0b", marginBottom: 18 }}>💎 Rewards</div>
@@ -520,6 +567,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ══ GLOBAL LEADERBOARD ══════════════════════════════════════════════ */}
         {page === "global" && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
             <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#3b82f6", marginBottom: 4 }}>🌍 Global Stats</div>
@@ -595,6 +643,7 @@ export default function App() {
 
       <BannerAd pos="bottom" />
 
+      {/* NAV */}
       <nav className="nav">
         {[["dashboard","🏠","Home"],["menu","🎮","Play"],["rewards","💎","Earn"],["global","🌍","Global"]].map(([id,ic,lbl]) => (
           <button key={id} className={`nb ${page===id?"on":""}`} onClick={() => { if (!quiz) { setResult(null); setPage(id); } }} style={{ opacity: quiz && id !== "quiz" ? .35 : 1 }}>
@@ -603,6 +652,7 @@ export default function App() {
         ))}
       </nav>
 
+      {/* SWITCH WARNING */}
       {switchWarn && (
         <div className="overlay">
           <div className="modal">
