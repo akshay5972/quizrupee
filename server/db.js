@@ -105,9 +105,8 @@ export async function initDB() {
       created_at  TIMESTAMP DEFAULT NOW(),
       CHECK (sender_id <> receiver_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_messages_convo ON messages(
-      LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id), created_at DESC
-    );
+    CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_pair2 ON messages(receiver_id, sender_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read);
   `);
   console.log('Database initialized');
