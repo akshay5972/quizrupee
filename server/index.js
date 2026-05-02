@@ -29,7 +29,7 @@ app.get('/api/health', (_, res) => res.json({ ok: true }));
 const distPath = join(__dirname, '..', 'dist');
 if (isProd && existsSync(distPath)) {
   app.use(express.static(distPath));
-  app.get('*', (req, res) => {
+  app.use((req, res) => {
     res.sendFile(join(distPath, 'index.html'));
   });
 }
