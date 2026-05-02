@@ -1,4 +1,4 @@
- import { useState, useEffect } from "react";
+ import { useState, useEffect, useRef } from "react";
 
 /* ── CONSTANTS ─────────────────────────────────────────────────────────── */
 const CATEGORIES = [
@@ -13,18 +13,6 @@ const CATEGORIES = [
   { id: "animals",       label: "Animals",        icon: "🐾", color: "#F97316" },
 ];
 const MEDAL = ["🥇", "🥈", "🥉"];
-const CAT_DESC = {
-  sports:        "sports, Olympics, cricket, football, tennis, basketball, famous athletes",
-  entertainment: "cartoons, Disney, Pixar, kids movies, TV shows, superheroes, popular children's characters",
-  science:       "basic science, human body, animals, plants, simple physics and chemistry concepts",
-  space:         "planets, solar system, astronauts, stars, rockets, space exploration, galaxies",
-  politics:      "Indian government, world capitals, country flags, leaders, democracy basics, Indian history",
-  history:       "world history, famous inventors, ancient civilizations, historical events and discoveries",
-  maths:         "arithmetic, geometry, multiplication tables, fractions, simple algebra, number facts",
-  geography:     "world geography, capital cities, oceans, mountains, rivers, continents, countries",
-  animals:       "animal facts, habitats, food chains, pets, wildlife, endangered species, animal behaviors",
-};
-
 /* ── API HELPER ─────────────────────────────────────────────────────────── */
 const api = async (path, { method = "GET", body } = {}) => {
   const token = localStorage.getItem("qr_token");
@@ -41,7 +29,7 @@ const api = async (path, { method = "GET", body } = {}) => {
   return data;
 };
 
-/* ── GEMINI API (via backend proxy) ─────────────────────────────────────── */
+/* ── QUESTION BANK (server-side cache, per-user no-repeat) ─────────────── */
 const generateQuestions = async (categoryId) => {
   const data = await api("/quiz/generate", { method: "POST", body: { category: categoryId } });
   if (!data.questions) throw new Error(data.error || "No questions returned");
@@ -150,6 +138,11 @@ export default function App() {
   const [adminWithdrawals, setAdminWithdrawals] = useState([]);
   const [adminNotes, setAdminNotes] = useState({});
   const [adminLoading, setAdminLoading] = useState(false);
+  const [qbStats, setQbStats] = useState(null);
+  const [qbMode, setQbMode] = useState("add");
+  const [qbUploading, setQbUploading] = useState(false);
+  const [qbMsg, setQbMsg] = useState(null);
+  const qbFileRef = useRef(null);
 
   /* referral */
   const [refCode] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
@@ -233,11 +226,73 @@ export default function App() {
   useEffect(() => {
     if (page !== "admin" || !user?.is_admin) return;
     setAdminLoading(true);
-    Promise.all([api("/admin/stats"), api("/admin/withdrawals")])
-      .then(([stats, wds]) => { setAdminStats(stats); setAdminWithdrawals(wds.requests || []); })
+    Promise.all([api("/admin/stats"), api("/admin/withdrawals"), api("/admin/questions/stats")])
+      .then(([stats, wds, qb]) => {
+        setAdminStats(stats);
+        setAdminWithdrawals(wds.requests || []);
+        setQbStats(qb);
+      })
       .catch(() => {})
       .finally(() => setAdminLoading(false));
   }, [page]);
+
+  const reloadQbStats = async () => {
+    try { const qb = await api("/admin/questions/stats"); setQbStats(qb); } catch {}
+  };
+
+  const downloadTemplate = () => {
+    const token = localStorage.getItem("qr_token");
+    fetch("/api/admin/questions/template", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "QuizRupee_question_template.xlsx";
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => setQbMsg({ type: "err", text: "Download failed." }));
+  };
+
+  const handleQbUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setQbUploading(true); setQbMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("mode", qbMode);
+      const token = localStorage.getItem("qr_token");
+      const res = await fetch("/api/admin/questions/import", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Import failed");
+      const errSuffix = (d.errors?.length ? ` · ${d.errors.length} skipped (errors)` : "");
+      setQbMsg({
+        type: "ok",
+        text: `✅ Imported ${d.inserted} new questions${d.skipped_duplicates ? ` · ${d.skipped_duplicates} duplicates skipped` : ""}${d.cleared_in_replace_mode ? ` · ${d.cleared_in_replace_mode} cleared` : ""}${errSuffix}`,
+        errors: d.errors || [],
+      });
+      await reloadQbStats();
+    } catch (err) {
+      setQbMsg({ type: "err", text: `❌ ${err.message}` });
+    } finally {
+      setQbUploading(false);
+      if (qbFileRef.current) qbFileRef.current.value = "";
+    }
+  };
+
+  const handleQbClear = async (cat) => {
+    if (!confirm(`Delete ALL questions in "${cat}"? This cannot be undone.`)) return;
+    try {
+      const d = await api(`/admin/questions/${cat}`, { method: "DELETE" });
+      setQbMsg({ type: "ok", text: `✅ Cleared ${d.deleted} questions from ${cat}` });
+      await reloadQbStats();
+    } catch (e) { setQbMsg({ type: "err", text: `❌ ${e.message}` }); }
+  };
 
   /* ── AUTH ── */
   const handleAuth = async () => {
@@ -359,7 +414,7 @@ export default function App() {
         <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 32, fontWeight: 900, color: "#e94560", animation: "glow 3s ease infinite" }}>QuizRupee</div>
         <div style={{ fontSize: 12, color: "#3a3a5a", marginTop: 6, letterSpacing: 3, textTransform: "uppercase" }}>Answer · Learn · Earn</div>
         <div style={{ marginTop: 12, display: "flex", gap: 16, justifyContent: "center", fontSize: 12, color: "#2a2a44" }}>
-          <span>⚡ AI Questions</span><span>🎯 1 pt / correct</span><span>💸 Withdraw via UPI</span>
+          <span>⚡ Curated Questions</span><span>🎯 1 pt / correct</span><span>💸 Withdraw via UPI</span>
         </div>
       </div>
       <div style={{ width: "100%", maxWidth: 360, background: "#0c0c1e", borderRadius: 22, padding: "26px 22px", border: "1px solid #1a1a30", animation: "fadeUp .5s .08s ease both" }}>
@@ -385,7 +440,7 @@ export default function App() {
         </div>
       </div>
       <div style={{ marginTop: 20, fontSize: 11, color: "#1e1e30", textAlign: "center", lineHeight: 1.9 }}>
-        Powered by Gemini AI · Free to play<br />1 pt per correct · 1000 pts = ₹100 · Withdraw via UPI
+Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹100 · Withdraw via UPI
       </div>
     </div>
   );
@@ -552,7 +607,7 @@ export default function App() {
         {page === "menu" && !quiz && !result && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
             <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#e94560", marginBottom: 4 }}>Choose Category</div>
-            <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>Gemini AI generates fresh questions every round</div>
+            <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>Curated bank · You'll never see the same question twice</div>
             {loadErr && <div style={{ background: "rgba(239,68,68,.1)", border: "1px solid #ef444430", borderRadius: 12, padding: "11px 14px", marginBottom: 14, fontSize: 13, color: "#ef4444", fontWeight: 700 }}>⚠️ {loadErr}</div>}
             <div style={{ fontSize: 11, color: "#252540", marginBottom: 14, padding: "9px 13px", background: "#0c0c1e", borderRadius: 10, border: "1px solid #181828", lineHeight: 1.7 }}>
               💡 10 questions · 1 pt per correct answer · 10 pts = ₹1 · Don't switch tabs!
@@ -596,7 +651,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 0" }}>
               <div style={{ width: 44, height: 44, border: "4px solid #181828", borderTopColor: "#e94560", borderRadius: "50%", animation: "spin 1s linear infinite", marginBottom: 16 }} />
-              <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#e94560", fontWeight: 900 }}>Gemini AI Generating...</div>
+              <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#e94560", fontWeight: 900 }}>Loading Questions...</div>
               <div style={{ fontSize: 12, color: "#444", marginTop: 6 }}>Fresh questions just for you ✨</div>
             </div>
           </div>
@@ -852,6 +907,78 @@ export default function App() {
                 ))}
               </div>
             )}
+
+            {/* QUESTION BANK MANAGEMENT */}
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 12 }}>📚 QUESTION BANK</div>
+
+            <div className="card" style={{ marginBottom: 18, padding: 14 }}>
+              {qbStats && (
+                <>
+                  <div style={{ fontSize: 12, color: "#444", marginBottom: 4 }}>Total questions in bank</div>
+                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 26, fontWeight: 900, color: qbStats.total >= 200 ? "#22c55e" : qbStats.total >= 50 ? "#f59e0b" : "#ef4444", marginBottom: 10 }}>
+                    {qbStats.total.toLocaleString()}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+                    {Object.entries(qbStats.stats).map(([cat, n]) => {
+                      const c = CATEGORIES.find(x => x.id === cat);
+                      const color = n >= 200 ? "#22c55e" : n >= 50 ? "#f59e0b" : n > 0 ? "#a855f7" : "#666";
+                      return (
+                        <div key={cat} style={{ background: "rgba(0,0,0,.25)", border: `1px solid ${color}33`, borderRadius: 8, padding: "6px 8px", textAlign: "center" }}>
+                          <div style={{ fontSize: 14 }}>{c?.icon}</div>
+                          <div style={{ fontSize: 9, color: "#666", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>{c?.label || cat}</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color, marginTop: 2 }}>{n}</div>
+                          {n > 0 && (
+                            <button onClick={() => handleQbClear(cat)} style={{ marginTop: 4, fontSize: 9, padding: "2px 6px", borderRadius: 5, background: "rgba(239,68,68,.1)", border: "1px solid #ef444433", color: "#ef4444", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>clear</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#666", marginBottom: 12, lineHeight: 1.5 }}>
+                    Recommended: 200+ per category. Below 50 shows orange. Below 10 = users will see error.
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <button onClick={downloadTemplate} style={{ flex: 1, padding: "10px", borderRadius: 9, background: "rgba(59,130,246,.15)", border: "1.5px solid #3b82f6", color: "#60a5fa", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                  ⬇️ Download Template
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                <button onClick={() => setQbMode("add")} style={{ flex: 1, padding: "8px", borderRadius: 8, background: qbMode === "add" ? "rgba(34,197,94,.18)" : "rgba(0,0,0,.25)", border: `1.5px solid ${qbMode === "add" ? "#22c55e" : "#333"}`, color: qbMode === "add" ? "#22c55e" : "#666", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                  ➕ ADD MODE
+                </button>
+                <button onClick={() => setQbMode("replace")} style={{ flex: 1, padding: "8px", borderRadius: 8, background: qbMode === "replace" ? "rgba(239,68,68,.18)" : "rgba(0,0,0,.25)", border: `1.5px solid ${qbMode === "replace" ? "#ef4444" : "#333"}`, color: qbMode === "replace" ? "#ef4444" : "#666", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                  🔄 REPLACE MODE
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: "#555", marginBottom: 10, lineHeight: 1.5 }}>
+                {qbMode === "add"
+                  ? "Add: appends new questions; duplicates (same text) are skipped automatically."
+                  : "Replace: deletes ALL existing questions in the categories present in the file before importing. Use for weekly refreshes."}
+              </div>
+
+              <input ref={qbFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleQbUpload} disabled={qbUploading} style={{ display: "none" }} />
+              <button onClick={() => qbFileRef.current?.click()} disabled={qbUploading} style={{ width: "100%", padding: "12px", borderRadius: 10, background: "linear-gradient(135deg,#a855f7,#7c3aed)", border: "none", color: "#fff", fontWeight: 900, fontSize: 13, cursor: qbUploading ? "wait" : "pointer", fontFamily: "inherit", opacity: qbUploading ? 0.6 : 1 }}>
+                {qbUploading ? "⏳ Uploading & parsing..." : "📤 Upload Excel File"}
+              </button>
+
+              {qbMsg && (
+                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: qbMsg.type === "ok" ? "rgba(34,197,94,.1)" : "rgba(239,68,68,.1)", border: `1px solid ${qbMsg.type === "ok" ? "#22c55e44" : "#ef444444"}`, color: qbMsg.type === "ok" ? "#86efac" : "#fca5a5", fontSize: 12, lineHeight: 1.5 }}>
+                  {qbMsg.text}
+                  {qbMsg.errors?.length > 0 && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 10, color: "#999" }}>Show {qbMsg.errors.length} row errors</summary>
+                      <div style={{ marginTop: 6, fontSize: 10, color: "#999", maxHeight: 120, overflow: "auto" }}>
+                        {qbMsg.errors.map((e, i) => <div key={i}>• {e}</div>)}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 12 }}>WITHDRAWAL REQUESTS</div>
 

@@ -1,13 +1,13 @@
 # QuizRupee
 
-AI-powered quiz app where users earn real money via UPI withdrawals.
+Quiz app where users earn real money via UPI withdrawals. Questions come from a curated, admin-managed bank — no third-party AI calls at runtime.
 
 ## Architecture
 
 - **Frontend**: React + Vite on port 5000 (`npm run dev`)
 - **Backend**: Express.js on port 3001 (`npm run server`)
 - **Database**: Replit PostgreSQL (via `DATABASE_URL`)
-- **AI**: Google Gemini 2.0 Flash for question generation
+- **Question Source**: Static question bank in PostgreSQL, uploaded by admin via Excel (.xlsx). Per-user no-repeat-per-category guarantee with auto-cycling once a user exhausts a category.
 
 ## Workflows
 
@@ -25,30 +25,43 @@ AI-powered quiz app where users earn real money via UPI withdrawals.
 
 | Key | Description |
 |-----|-------------|
-| `VITE_GEMINI_API_KEY` | Google Gemini API key (free at aistudio.google.com) |
 | `JWT_SECRET` | Auto-generated JWT signing secret |
 | `DATABASE_URL` | Replit PostgreSQL connection string (auto-set) |
 | `ADMIN_EMAIL` | Email address that gets admin access on registration |
 
+`VITE_GEMINI_API_KEY` / `GEMINI_API_KEY` may still exist in env from earlier iterations but are unused.
+
 ## Admin Panel
 
-Set `ADMIN_EMAIL` secret to your email address, then register with that email to get admin access. Admin users see an ⚙️ Admin tab with:
+Set `ADMIN_EMAIL` secret, then register/login with that email. Admin users see an ⚙️ Admin tab with:
 - Overview stats (users, quizzes, pending payouts, total paid)
+- **Question Bank manager**: per-category counts, Excel upload (Add or Replace mode), template download, per-category clear
 - All withdrawal requests with approve/reject + note field
 - Points auto-refunded on rejection
+
+### Excel format for question import
+Columns: `category | question | correct | wrong1 | wrong2 | wrong3`
+Valid categories: `sports, entertainment, science, space, politics, history, maths, geography, animals`
+- **Add mode** — appends new rows; duplicates (same category + question text) are skipped via SHA-256 hash unique index.
+- **Replace mode** — wipes all existing questions in any category present in the file before inserting.
+- Recommended: 200+ per category. Below 10 the `/quiz/generate` endpoint returns 503.
+
+## Question delivery (no-repeat guarantee)
+
+`POST /api/quiz/generate` atomically claims 10 unseen questions for the user via a CTE that joins `cached_questions` against `user_seen_questions` and inserts the chosen IDs. If the user has seen everything in that category, their `user_seen_questions` rows for that category are deleted and 10 are re-claimed (cycling). Returns 503 if the bank has fewer than 10 questions for the category.
 
 ## File Structure
 
 ```
 server/
   index.js              # Express entry point
-  db.js                 # PostgreSQL pool + initDB
+  db.js                 # PostgreSQL pool + initDB (cached_questions, user_seen_questions)
   middleware/auth.js    # JWT auth + admin middleware
   routes/
     auth.js             # Register, Login, /me
-    quiz.js             # Complete quiz, category stats
+    quiz.js             # Cache-only /generate with cycling, complete quiz, category stats
     withdraw.js         # Request withdrawal, history
-    admin.js            # Admin stats, manage withdrawals
+    admin.js            # Admin stats, withdrawals, question-bank import/stats/clear/template
     leaderboard.js      # Overall and category leaderboards
 
 src/
@@ -63,3 +76,5 @@ vite.config.js          # Proxy /api/* → localhost:3001
 - `quiz_sessions` — id, user_id, category, score, points_earned, played_at
 - `withdrawal_requests` — id, user_id, upi_id, amount, points_used, status, admin_note
 - `category_stats` — id, user_id, category, played, total_correct, best_score, points_earned
+- `cached_questions` — id, category, question, options jsonb, question_hash unique (sha256 of category+text), created_at
+- `user_seen_questions` — (user_id, question_id) PK pair, ON DELETE CASCADE → cached_questions
