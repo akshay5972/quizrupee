@@ -16,6 +16,47 @@ const CATEGORIES = [
   { id: "logical",       label: "Logical",        icon: "🧠", color: "#06B6D4" },
 ];
 const MEDAL = ["🥇", "🥈", "🥉"];
+const COUNTRIES = [
+  "India","United States","United Kingdom","Canada","Australia","United Arab Emirates","Singapore","Saudi Arabia","Qatar","Oman","Kuwait","Bahrain",
+  "Pakistan","Bangladesh","Sri Lanka","Nepal","Bhutan","Maldives","Afghanistan",
+  "Germany","France","Italy","Spain","Netherlands","Belgium","Sweden","Norway","Denmark","Finland","Ireland","Switzerland","Austria","Portugal","Greece","Poland","Russia","Ukraine","Turkey",
+  "China","Japan","South Korea","Thailand","Vietnam","Indonesia","Malaysia","Philippines","Hong Kong","Taiwan","Mongolia",
+  "Brazil","Argentina","Chile","Mexico","Colombia","Peru","Venezuela",
+  "South Africa","Nigeria","Kenya","Egypt","Morocco","Ghana","Ethiopia","Tanzania","Uganda",
+  "New Zealand","Fiji",
+  "Israel","Iran","Iraq","Jordan","Lebanon",
+  "Other",
+];
+const AVATAR_URL = (seed, gender) => {
+  const safeSeed = encodeURIComponent(seed || "guest");
+  const opts = gender === "female"
+    ? "&hair=longHair01,longHair02,longHair03,longHairBigHair,longHairCurly,longHairCurvy,longHairStraight"
+    : gender === "male"
+    ? "&hair=shortHair01,shortHair02,shortHair03,shortHairShortFlat,shortHairShortRound,shortHairTheCaesar"
+    : "";
+  return `https://api.dicebear.com/9.x/avataaars/svg?seed=${safeSeed}${opts}`;
+};
+function Avatar({ seed, gender, size = 56, ring = "#1a1a30" }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: "#0c0c1e", border: `2px solid ${ring}`, overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {seed
+        ? <img src={AVATAR_URL(seed, gender)} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        : <span style={{ fontSize: size * 0.5, color: "#3a3a5a" }}>👤</span>}
+    </div>
+  );
+}
+function Select({ label, value, onChange, options, placeholder = "Select..." }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ fontSize: 10, fontWeight: 800, color: "#3a3a5a", letterSpacing: 1.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>{label}</label>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ width: "100%", padding: "12px 16px", background: "#07070e", border: "1.5px solid #1a2238", borderRadius: 12, color: value ? "#e0e0e0" : "#3a3a5a", fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", appearance: "none" }}>
+        <option value="">{placeholder}</option>
+        {options.map(o => <option key={o} value={o} style={{ color: "#e0e0e0", background: "#07070e" }}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
 /* ── API HELPER ─────────────────────────────────────────────────────────── */
 const api = async (path, { method = "GET", body } = {}) => {
   const token = localStorage.getItem("qr_token");
@@ -109,7 +150,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", gender: "", country: "" });
   const [authErr, setAuthErr] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
@@ -152,6 +193,18 @@ export default function App() {
   const [qbUploading, setQbUploading] = useState(false);
   const [qbMsg, setQbMsg] = useState(null);
   const qbFileRef = useRef(null);
+
+  /* side menu / profile / help / reports */
+  const [sideOpen, setSideOpen] = useState(false);
+  const [profileEdit, setProfileEdit] = useState({ gender: "", country: "" });
+  const [profileMsg, setProfileMsg] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [helpMsg, setHelpMsg] = useState("");
+  const [helpStatus, setHelpStatus] = useState("");
+  const [helpBusy, setHelpBusy] = useState(false);
+  const [reports, setReports] = useState([]);
+  const [reportsFilter, setReportsFilter] = useState("open");
+  const [reportsCounts, setReportsCounts] = useState({ open: 0, resolved: 0 });
 
   /* referral */
   const [refCode] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
@@ -219,6 +272,31 @@ export default function App() {
     if (page !== "global") return;
     api("/leaderboard").then(d => setLb(d)).catch(() => {});
   }, [page]);
+
+  /* sync profile editor when opening profile page */
+  useEffect(() => {
+    if (page === "profile") {
+      setProfileEdit({ gender: user?.gender || "", country: user?.country || "" });
+      setProfileMsg("");
+    }
+    if (page === "help") setHelpStatus("");
+  }, [page, user?.gender, user?.country]);
+
+  /* admin reports fetch */
+  useEffect(() => {
+    if (page !== "admin" || !user?.is_admin) return;
+    api(`/admin/reports?status=${reportsFilter}`)
+      .then(d => { setReports(d.reports || []); setReportsCounts(d.counts || { open: 0, resolved: 0 }); })
+      .catch(() => {});
+  }, [page, reportsFilter, user?.is_admin]);
+
+  const adminResolveReport = async (id, status) => {
+    try {
+      await api(`/admin/reports/${id}`, { method: "PATCH", body: { status } });
+      const d = await api(`/admin/reports?status=${reportsFilter}`);
+      setReports(d.reports || []); setReportsCounts(d.counts || { open: 0, resolved: 0 });
+    } catch (e) { alert(e.message); }
+  };
 
   useEffect(() => {
     if (page !== "global" || lbTab !== "category") return;
@@ -309,7 +387,7 @@ export default function App() {
     try {
       const endpoint = authMode === "signup" ? "/auth/register" : "/auth/login";
       const body = authMode === "signup"
-        ? { name: form.name, email: form.email, password: form.password, ...(refCode ? { ref_code: refCode } : {}) }
+        ? { name: form.name, email: form.email, password: form.password, gender: form.gender, country: form.country, ...(refCode ? { ref_code: refCode } : {}) }
         : { email: form.email, password: form.password };
       const d = await api(endpoint, { method: "POST", body });
       localStorage.setItem("qr_token", d.token);
@@ -324,6 +402,35 @@ export default function App() {
     localStorage.removeItem("qr_token");
     setToken(null); setUser(null); setCatStats([]);
     setPage("dashboard"); setQuiz(null); setResult(null);
+    setSideOpen(false);
+  };
+
+  /* ── PROFILE ── */
+  const saveProfile = async ({ gender, country, regenerate_avatar } = {}) => {
+    setProfileMsg(""); setProfileBusy(true);
+    try {
+      await api("/profile/me", { method: "PATCH", body: { gender, country, regenerate_avatar } });
+      await refreshUser();
+      setProfileMsg("Saved!");
+      setTimeout(() => setProfileMsg(""), 2500);
+    } catch (e) {
+      setProfileMsg(`Error: ${e.message}`);
+    }
+    setProfileBusy(false);
+  };
+
+  /* ── HELP ── */
+  const submitHelp = async () => {
+    if (!helpMsg.trim()) return setHelpStatus("Please describe the issue");
+    setHelpBusy(true); setHelpStatus("");
+    try {
+      await api("/help/report", { method: "POST", body: { message: helpMsg.trim() } });
+      setHelpMsg("");
+      setHelpStatus("✅ Thanks — your report has been sent. We'll review it shortly.");
+    } catch (e) {
+      setHelpStatus(`❌ ${e.message}`);
+    }
+    setHelpBusy(false);
   };
 
   const watchAd = async () => {
@@ -437,6 +544,22 @@ export default function App() {
         {authMode === "signup" && <Field label="Your Name" placeholder="e.g. Rahul Sharma" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} />}
         <Field label="Email" type="email" placeholder="you@gmail.com" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} />
         <Field label="Password" type="password" placeholder="Min 6 characters" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} onEnter={handleAuth} />
+        {authMode === "signup" && (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 10, fontWeight: 800, color: "#3a3a5a", letterSpacing: 1.5, display: "block", marginBottom: 8, textTransform: "uppercase" }}>Gender</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                {[["male","👨 Male"],["female","👩 Female"],["other","🧑 Other"]].map(([id, lbl]) => (
+                  <button key={id} type="button" onClick={() => setForm(f => ({ ...f, gender: id }))}
+                    style={{ padding: "10px 6px", borderRadius: 11, border: `1.5px solid ${form.gender === id ? "#e94560" : "#1a2238"}`, background: form.gender === id ? "rgba(233,69,96,.14)" : "#07070e", color: form.gender === id ? "#e94560" : "#888", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Select label="Country" value={form.country} onChange={v => setForm(f => ({ ...f, country: v }))} options={COUNTRIES} placeholder="Select your country" />
+          </>
+        )}
         {authErr && <div style={{ background: "rgba(233,69,96,.1)", border: "1px solid #e9456030", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#e94560", fontWeight: 700 }}>⚠️ {authErr}</div>}
         <button onClick={handleAuth} disabled={authBusy} style={{ width: "100%", padding: 14, borderRadius: 13, border: "none", background: authBusy ? "#1a1a30" : "linear-gradient(135deg,#e94560,#b91c4a)", color: authBusy ? "#444" : "#fff", fontWeight: 900, fontSize: 16, fontFamily: "inherit", cursor: authBusy ? "not-allowed" : "pointer", letterSpacing: .5, transition: "all .2s" }}>
           {authBusy ? "Please wait..." : authMode === "login" ? "Log In →" : "Create Account →"}
@@ -470,13 +593,19 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
 
       {/* ── GLOBAL HEADER ── */}
       <div style={{ padding: "10px 15px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #141428", background: "#09091a", flexShrink: 0 }}>
-        <div>
-          <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 15, fontWeight: 900, color: "#e94560" }}>QuizRupee</div>
-          <div style={{ fontSize: 11, color: "#3a3a5a", marginTop: 1 }}>👤 {user.name?.split(" ")[0]} · <span style={{ color: "#e94560", fontWeight: 800 }}>{pts.toLocaleString()} pts</span></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => setSideOpen(true)} aria-label="menu"
+            style={{ background: "transparent", border: "1.5px solid #1a1a30", borderRadius: 10, padding: "7px 11px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 3, fontFamily: "inherit" }}>
+            <span style={{ width: 16, height: 2, background: "#e94560", borderRadius: 1 }} />
+            <span style={{ width: 16, height: 2, background: "#e94560", borderRadius: 1 }} />
+            <span style={{ width: 16, height: 2, background: "#e94560", borderRadius: 1 }} />
+          </button>
+          <div>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 15, fontWeight: 900, color: "#e94560" }}>QuizRupee</div>
+            <div style={{ fontSize: 11, color: "#3a3a5a", marginTop: 1 }}>👤 {user.name?.split(" ")[0]} · <span style={{ color: "#e94560", fontWeight: 800 }}>{pts.toLocaleString()} pts</span></div>
+          </div>
         </div>
-        <button onClick={logout} style={{ background: "rgba(233,69,96,.12)", border: "1.5px solid #e9456050", borderRadius: 10, color: "#e94560", fontWeight: 900, fontSize: 13, cursor: "pointer", padding: "8px 16px", fontFamily: "inherit" }}>
-          Sign Out
-        </button>
+        <Avatar seed={user.avatar_seed} gender={user.gender} size={38} ring="#e9456050" />
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 68 }}>
@@ -893,6 +1022,97 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
           </div>
         )}
 
+        {/* ══ PROFILE ══ */}
+        {page === "profile" && (
+          <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#e94560", marginBottom: 18 }}>👤 My Profile</div>
+
+            <div className="card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 14 }}>
+              <Avatar seed={user.avatar_seed} gender={user.gender} size={84} ring="#e94560" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 17, color: "#fff" }}>{user.name}</div>
+                <div style={{ fontSize: 11, color: "#666", marginTop: 2, wordBreak: "break-all" }}>{user.email}</div>
+                <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {user.gender && <span className="tag" style={{ background: "rgba(233,69,96,.12)", color: "#e94560", border: "1px solid #e9456033" }}>{user.gender === "male" ? "♂ Male" : user.gender === "female" ? "♀ Female" : "🧑 Other"}</span>}
+                  {user.country && <span className="tag" style={{ background: "rgba(59,130,246,.1)", color: "#60a5fa", border: "1px solid #3b82f633" }}>📍 {user.country}</span>}
+                  {user.is_admin && <span className="tag" style={{ background: "rgba(168,85,247,.12)", color: "#a855f7", border: "1px solid #a855f733" }}>ADMIN</span>}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+              <div className="card" style={{ textAlign: "center", padding: 10 }}>
+                <div style={{ fontSize: 16, fontWeight: 900, color: "#e94560" }}>{pts.toLocaleString()}</div>
+                <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>POINTS</div>
+              </div>
+              <div className="card" style={{ textAlign: "center", padding: 10 }}>
+                <div style={{ fontSize: 16, fontWeight: 900, color: "#22c55e" }}>₹{parseFloat(user.total_earned || 0).toFixed(0)}</div>
+                <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>EARNED</div>
+              </div>
+              <div className="card" style={{ textAlign: "center", padding: 10 }}>
+                <div style={{ fontSize: 16, fontWeight: 900, color: "#f59e0b" }}>{user.streak || 0}🔥</div>
+                <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>STREAK</div>
+              </div>
+            </div>
+
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 12 }}>EDIT PROFILE</div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 10, fontWeight: 800, color: "#3a3a5a", letterSpacing: 1.5, display: "block", marginBottom: 8, textTransform: "uppercase" }}>Gender</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  {[["male","👨 Male"],["female","♀ Female"],["other","🧑 Other"]].map(([id, lbl]) => (
+                    <button key={id} type="button" onClick={() => setProfileEdit(p => ({ ...p, gender: id }))}
+                      style={{ padding: "10px 6px", borderRadius: 11, border: `1.5px solid ${profileEdit.gender === id ? "#e94560" : "#1a2238"}`, background: profileEdit.gender === id ? "rgba(233,69,96,.14)" : "#07070e", color: profileEdit.gender === id ? "#e94560" : "#888", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Select label="Country" value={profileEdit.country} onChange={v => setProfileEdit(p => ({ ...p, country: v }))} options={COUNTRIES} placeholder="Select your country" />
+              {!user.gender && !user.country && (
+                <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(245,158,11,.1)", border: "1px solid #f59e0b33", color: "#f59e0b", fontSize: 11, fontWeight: 700 }}>
+                  ℹ️ Please select both gender and country to create your profile.
+                </div>
+              )}
+              <button onClick={() => saveProfile({ gender: profileEdit.gender, country: profileEdit.country })}
+                disabled={profileBusy || (!user.gender && (!profileEdit.gender || !profileEdit.country)) || (!profileEdit.gender && !profileEdit.country)}
+                style={{ width: "100%", padding: 12, borderRadius: 12, border: "none", background: profileBusy ? "#1a1a30" : "linear-gradient(135deg,#e94560,#b91c4a)", color: profileBusy ? "#444" : "#fff", fontWeight: 900, fontSize: 14, fontFamily: "inherit", cursor: profileBusy ? "not-allowed" : "pointer" }}>
+                {profileBusy ? "Saving..." : "Save Changes"}
+              </button>
+              <button onClick={() => saveProfile({ regenerate_avatar: true })} disabled={profileBusy || !user.gender}
+                style={{ width: "100%", padding: 10, borderRadius: 11, marginTop: 8, background: "transparent", border: "1.5px solid #1a2238", color: "#888", fontWeight: 800, fontSize: 12, cursor: profileBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                🎲 Shuffle My Avatar
+              </button>
+              {profileMsg && <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: profileMsg.startsWith("Error") ? "rgba(239,68,68,.1)" : "rgba(34,197,94,.1)", color: profileMsg.startsWith("Error") ? "#ef4444" : "#22c55e", fontSize: 12, fontWeight: 700 }}>{profileMsg}</div>}
+            </div>
+          </div>
+        )}
+
+        {/* ══ HELP / REPORT ══ */}
+        {page === "help" && (
+          <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#3b82f6", marginBottom: 4 }}>🆘 Help & Report</div>
+            <div style={{ fontSize: 12, color: "#444", marginBottom: 18 }}>Found a bug, withdrawal issue, or anything off? Tell us — admin will review.</div>
+
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 10 }}>DESCRIBE THE ISSUE</div>
+              <textarea value={helpMsg} onChange={e => setHelpMsg(e.target.value)} maxLength={2000}
+                placeholder="Example: My withdrawal was approved 3 days ago but I haven't received the money on UPI. Or: A question in the Sports category was wrong..."
+                style={{ width: "100%", minHeight: 140, padding: 12, background: "#07070e", border: "1.5px solid #181828", borderRadius: 12, color: "#e0e0e0", fontSize: 14, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5 }} />
+              <div style={{ fontSize: 10, color: "#444", marginTop: 4, textAlign: "right" }}>{helpMsg.length}/2000</div>
+              <button onClick={submitHelp} disabled={helpBusy || !helpMsg.trim()}
+                style={{ width: "100%", padding: 12, borderRadius: 12, border: "none", marginTop: 8, background: helpBusy || !helpMsg.trim() ? "#1a1a30" : "linear-gradient(135deg,#3b82f6,#1d4ed8)", color: helpBusy || !helpMsg.trim() ? "#444" : "#fff", fontWeight: 900, fontSize: 14, fontFamily: "inherit", cursor: helpBusy || !helpMsg.trim() ? "not-allowed" : "pointer" }}>
+                {helpBusy ? "Sending..." : "Send Report"}
+              </button>
+              {helpStatus && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: helpStatus.startsWith("✅") ? "rgba(34,197,94,.1)" : "rgba(239,68,68,.1)", color: helpStatus.startsWith("✅") ? "#22c55e" : "#ef4444", fontSize: 12, fontWeight: 700, lineHeight: 1.5 }}>{helpStatus}</div>}
+            </div>
+
+            <div style={{ fontSize: 11, color: "#444", lineHeight: 1.7, padding: "0 4px" }}>
+              💡 Tip: Include details like the time, category, exact button you tapped, and what you expected to happen. Screenshots aren't supported but a clear description goes a long way.
+            </div>
+          </div>
+        )}
+
         {/* ══ ADMIN PANEL ══ */}
         {page === "admin" && user.is_admin && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
@@ -989,7 +1209,48 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
               )}
             </div>
 
-            <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 12 }}>WITHDRAWAL REQUESTS</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 12, marginTop: 4 }}>USER REPORTS / HELP</div>
+
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              {[["open", `Open (${reportsCounts.open || 0})`], ["resolved", `Resolved (${reportsCounts.resolved || 0})`], ["all", "All"]].map(([id, lbl]) => (
+                <button key={id} onClick={() => setReportsFilter(id)}
+                  style={{ flex: 1, padding: "8px 4px", borderRadius: 9, border: `1.5px solid ${reportsFilter === id ? "#3b82f6" : "#1a2238"}`, background: reportsFilter === id ? "rgba(59,130,246,.14)" : "#07070e", color: reportsFilter === id ? "#60a5fa" : "#666", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+
+            {reports.length === 0 && (
+              <div className="card" style={{ textAlign: "center", color: "#444", padding: "20px 0", marginBottom: 18 }}>No reports.</div>
+            )}
+
+            {reports.map(r => (
+              <div key={r.id} className="card" style={{ marginBottom: 10, border: `1px solid ${r.status === "open" ? "#3b82f633" : "#181828"}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 900, fontSize: 13, color: "#fff" }}>{r.user_name || "(deleted user)"}</div>
+                    <div style={{ fontSize: 10, color: "#666", wordBreak: "break-all" }}>{r.user_email || "—"}</div>
+                  </div>
+                  <span className="tag" style={{ background: r.status === "open" ? "rgba(59,130,246,.14)" : "rgba(34,197,94,.14)", color: r.status === "open" ? "#60a5fa" : "#22c55e", border: `1px solid ${r.status === "open" ? "#3b82f633" : "#22c55e33"}`, fontSize: 9 }}>
+                    {r.status.toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.55, padding: "10px 12px", background: "#07070e", borderRadius: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 8 }}>{r.message}</div>
+                <div style={{ fontSize: 10, color: "#444", marginBottom: 8 }}>
+                  {new Date(r.created_at).toLocaleString("en-IN")}
+                  {r.resolved_at && <span> · Resolved {new Date(r.resolved_at).toLocaleString("en-IN")}</span>}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  {r.status === "open" ? (
+                    <button onClick={() => adminResolveReport(r.id, "resolved")} style={{ gridColumn: "1 / span 2", padding: 8, borderRadius: 9, background: "rgba(34,197,94,.15)", border: "1.5px solid #22c55e", color: "#22c55e", fontWeight: 900, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✅ Mark Resolved</button>
+                  ) : (
+                    <button onClick={() => adminResolveReport(r.id, "open")} style={{ gridColumn: "1 / span 2", padding: 8, borderRadius: 9, background: "transparent", border: "1.5px solid #1a2238", color: "#666", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>↩ Reopen</button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, margin: "18px 0 12px" }}>WITHDRAWAL REQUESTS</div>
 
             {adminWithdrawals.length === 0 && !adminLoading && (
               <div className="card" style={{ textAlign: "center", color: "#444", padding: "24px 0" }}>No withdrawal requests yet.</div>
@@ -1077,6 +1338,43 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
             <button onClick={() => { setMilestone(null); if (milestone >= 1000) setPage("rewards"); }} style={{ width: "100%", padding: 14, borderRadius: 13, background: "linear-gradient(135deg,#f59e0b,#e67e22)", color: "#000", fontWeight: 900, fontSize: 15, border: "none", cursor: "pointer", fontFamily: "inherit" }}>
               {milestone >= 1000 ? "Withdraw Now 💰" : "Keep Earning! 🚀"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── SIDE MENU ── */}
+      {sideOpen && (
+        <div onClick={() => setSideOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 250, animation: "fadeUp .15s ease" }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: 280, maxWidth: "82vw", height: "100%", background: "#0c0c1e", borderRight: "1px solid #1a1a30", padding: "22px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18, paddingBottom: 16, borderBottom: "1px solid #181828" }}>
+              <Avatar seed={user.avatar_seed} gender={user.gender} size={52} ring="#e94560" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 14, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</div>
+                <div style={{ fontSize: 11, color: "#e94560", fontWeight: 800, marginTop: 2 }}>{pts.toLocaleString()} pts · ₹{ptsRupees.toFixed(2)}</div>
+              </div>
+              <button onClick={() => setSideOpen(false)} style={{ background: "none", border: "none", color: "#666", fontSize: 22, cursor: "pointer", padding: 0 }}>✕</button>
+            </div>
+
+            {[
+              ["profile", "👤", "Profile"],
+              ["help",    "🆘", "Help / Report"],
+            ].map(([id, ic, lbl]) => (
+              <button key={id} onClick={() => { setPage(id); setSideOpen(false); }}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", borderRadius: 12, background: page === id ? "rgba(233,69,96,.14)" : "transparent", border: `1.5px solid ${page === id ? "#e94560" : "transparent"}`, color: page === id ? "#e94560" : "#ccc", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                <span style={{ fontSize: 19 }}>{ic}</span>{lbl}
+              </button>
+            ))}
+
+            <div style={{ flex: 1 }} />
+
+            <button onClick={logout}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", borderRadius: 12, background: "rgba(239,68,68,.08)", border: "1.5px solid #ef444433", color: "#ef4444", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+              <span style={{ fontSize: 19 }}>🚪</span>Logout
+            </button>
+
+            <div style={{ marginTop: 14, fontSize: 10, color: "#252540", textAlign: "center", letterSpacing: 1 }}>QuizRupee · v1.0</div>
           </div>
         </div>
       )}

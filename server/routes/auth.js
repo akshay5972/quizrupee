@@ -13,7 +13,11 @@ const safeUser = (u) => ({
   referral_code: u.referral_code, referral_count: u.referral_count || 0,
   streak: u.streak || 0, longest_streak: u.longest_streak || 0,
   created_at: u.created_at,
+  gender: u.gender || null, country: u.country || null, avatar_seed: u.avatar_seed || null,
 });
+
+const VALID_GENDERS = ['male', 'female', 'other'];
+const makeAvatarSeed = () => Math.random().toString(36).slice(2, 12);
 
 const generateReferralCode = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -34,11 +38,16 @@ const getOrCreateReferralCode = async (userId) => {
 };
 
 router.post('/register', async (req, res) => {
-  const { name, email, password, ref_code } = req.body;
+  const { name, email, password, ref_code, gender, country } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   if (!email?.includes('@')) return res.status(400).json({ error: 'Invalid email address' });
   if (!password || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const g = String(gender || '').toLowerCase().trim();
+  if (!VALID_GENDERS.includes(g)) return res.status(400).json({ error: 'Please select your gender' });
+  const c = String(country || '').trim();
+  if (!c || c.length > 80) return res.status(400).json({ error: 'Please select your country' });
 
+  const client = await pool.connect();
   try {
     const hash = await bcrypt.hash(password, 10);
     const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
@@ -46,7 +55,7 @@ router.post('/register', async (req, res) => {
 
     let referrerId = null;
     if (ref_code) {
-      const refResult = await pool.query(
+      const refResult = await client.query(
         'SELECT id FROM users WHERE referral_code = $1',
         [ref_code.toUpperCase()]
       );
@@ -56,32 +65,41 @@ router.post('/register', async (req, res) => {
     const newCode = generateReferralCode();
     const bonusPoints = referrerId ? 10 : 0;
     const bonusRupees = +(bonusPoints / 10).toFixed(2);
+    const seed = makeAvatarSeed();
 
-    await pool.query('BEGIN');
+    await client.query('BEGIN');
 
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO users (name, email, password_hash, is_admin, referral_code, referred_by, points, total_earned)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
       [name.trim(), email.toLowerCase(), hash, isAdmin, newCode, referrerId, bonusPoints, bonusRupees]
     );
     const user = result.rows[0];
 
+    await client.query(
+      `INSERT INTO profiles (user_id, gender, country, avatar_seed) VALUES ($1, $2, $3, $4)`,
+      [user.id, g, c, seed]
+    );
+    user.gender = g; user.country = c; user.avatar_seed = seed;
+
     if (referrerId) {
-      await pool.query(
+      await client.query(
         'UPDATE users SET points = points + 20, total_earned = total_earned + 2, referral_count = referral_count + 1 WHERE id = $1',
         [referrerId]
       );
     }
 
-    await pool.query('COMMIT');
+    await client.query('COMMIT');
 
     const token = jwt.sign({ id: user.id, email: user.email, is_admin: user.is_admin }, JWT_SECRET, { expiresIn: '30d' });
     res.json({ token, user: safeUser(user), bonus_points: bonusPoints });
   } catch (e) {
-    await pool.query('ROLLBACK');
+    await client.query('ROLLBACK');
     if (e.code === '23505') return res.status(400).json({ error: 'Email already registered' });
     console.error(e);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -89,7 +107,12 @@ router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   try {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+    const result = await pool.query(
+      `SELECT u.*, p.gender, p.country, p.avatar_seed
+       FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+       WHERE u.email = $1`,
+      [email.toLowerCase()]
+    );
     const user = result.rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: 'Wrong email or password' });
@@ -117,7 +140,12 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const result = await pool.query(
+      `SELECT u.*, p.gender, p.country, p.avatar_seed
+       FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+       WHERE u.id = $1`,
+      [req.user.id]
+    );
     const user = result.rows[0];
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (!user.referral_code) {

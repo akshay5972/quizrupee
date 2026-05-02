@@ -259,6 +259,51 @@ router.delete('/questions/:category', async (req, res) => {
   }
 });
 
+router.get('/reports', async (req, res) => {
+  const status = String(req.query.status || 'all').toLowerCase();
+  try {
+    const where = status === 'open' ? `WHERE r.status = 'open'`
+                : status === 'resolved' ? `WHERE r.status = 'resolved'`
+                : '';
+    const r = await pool.query(
+      `SELECT r.id, r.message, r.status, r.admin_note, r.created_at, r.resolved_at,
+              u.id AS user_id, u.name AS user_name, u.email AS user_email
+       FROM reports r LEFT JOIN users u ON u.id = r.user_id
+       ${where}
+       ORDER BY r.created_at DESC LIMIT 200`
+    );
+    const counts = await pool.query(
+      `SELECT status, COUNT(*)::int AS n FROM reports GROUP BY status`
+    );
+    const byStatus = { open: 0, resolved: 0 };
+    counts.rows.forEach(row => { byStatus[row.status] = row.n; });
+    res.json({ reports: r.rows, counts: byStatus });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.patch('/reports/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+  const status = String(req.body?.status || '').toLowerCase();
+  const adminNote = req.body?.admin_note ? String(req.body.admin_note).slice(0, 500) : null;
+  if (!['open', 'resolved'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  try {
+    await pool.query(
+      `UPDATE reports SET status = $1, admin_note = $2,
+         resolved_at = CASE WHEN $1 = 'resolved' THEN NOW() ELSE NULL END
+       WHERE id = $3`,
+      [status, adminNote, id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.get('/questions/template', async (req, res) => {
   const sample = [
     { category: 'animals', question: 'What sound does a cow make?', correct: 'Moo', wrong1: 'Bark', wrong2: 'Meow', wrong3: 'Roar' },

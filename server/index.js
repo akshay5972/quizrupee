@@ -10,6 +10,8 @@ import quizRoutes from './routes/quiz.js';
 import withdrawRoutes from './routes/withdraw.js';
 import adminRoutes from './routes/admin.js';
 import leaderboardRoutes from './routes/leaderboard.js';
+import profileRoutes from './routes/profile.js';
+import helpRoutes from './routes/help.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -23,6 +25,8 @@ app.use('/api/quiz', quizRoutes);
 app.use('/api/withdraw', withdrawRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/help', helpRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 // In production, serve built React files

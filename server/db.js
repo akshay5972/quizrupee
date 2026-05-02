@@ -70,6 +70,23 @@ export async function initDB() {
       PRIMARY KEY (user_id, question_id)
     );
     CREATE INDEX IF NOT EXISTS idx_user_seen_user ON user_seen_questions(user_id);
+    CREATE TABLE IF NOT EXISTS profiles (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      gender VARCHAR(20) NOT NULL,
+      country VARCHAR(80) NOT NULL,
+      avatar_seed VARCHAR(64) NOT NULL,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS reports (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      message TEXT NOT NULL,
+      status VARCHAR(20) DEFAULT 'open',
+      admin_note TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      resolved_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, created_at DESC);
   `);
   console.log('Database initialized');
 }

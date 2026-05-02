@@ -41,7 +41,7 @@ Set `ADMIN_EMAIL` secret, then register/login with that email. Admin users see a
 
 ### Excel format for question import
 Columns: `category | question | correct | wrong1 | wrong2 | wrong3`
-Valid categories: `sports, entertainment, science, space, politics, history, maths, geography, animals`
+Valid categories: `sports, entertainment, science, space, politics, history, maths, geography, animals, puzzle, tricky, logical`
 - **Add mode** — appends new rows; duplicates (same category + question text) are skipped via SHA-256 hash unique index.
 - **Replace mode** — wipes all existing questions in any category present in the file before inserting.
 - Recommended: 200+ per category. Below 10 the `/quiz/generate` endpoint returns 503.
@@ -58,11 +58,13 @@ server/
   db.js                 # PostgreSQL pool + initDB (cached_questions, user_seen_questions)
   middleware/auth.js    # JWT auth + admin middleware
   routes/
-    auth.js             # Register, Login, /me
+    auth.js             # Register (gender+country required), Login, /me (joins profiles)
     quiz.js             # Cache-only /generate with cycling, complete quiz, category stats
     withdraw.js         # Request withdrawal, history
-    admin.js            # Admin stats, withdrawals, question-bank import/stats/clear/template
+    admin.js            # Admin stats, withdrawals, question-bank, user reports
     leaderboard.js      # Overall and category leaderboards
+    profile.js          # GET/PATCH /me, GET /:userId — gender, country, avatar_seed (DiceBear)
+    help.js             # POST /report (text-only user help/report), GET /my-reports
 
 src/
   App.jsx               # Complete React frontend (single file)
@@ -78,3 +80,16 @@ vite.config.js          # Proxy /api/* → localhost:3001
 - `category_stats` — id, user_id, category, played, total_correct, best_score, points_earned
 - `cached_questions` — id, category, question, options jsonb, question_hash unique (sha256 of category+text), created_at
 - `user_seen_questions` — (user_id, question_id) PK pair, ON DELETE CASCADE → cached_questions
+- `profiles` — user_id PK FK→users, gender (male|female|other), country, avatar_seed, updated_at
+- `reports` — id, user_id, message, status (open|resolved), admin_note, created_at, resolved_at
+
+## Social / Profile (Ship 1)
+
+- Signup requires gender (M/F/Other) + country (dropdown ~70 countries).
+- Avatar = DiceBear `avataaars` SVG, seeded per user; gender biases hair styles. "Shuffle" generates a new seed.
+- Header shows hamburger (left) + avatar (right). Hamburger opens a left slide-in side menu with: Profile, Help/Report, Logout.
+- Profile page (`page === "profile"`): avatar + name/email/badges, stats (points / earned / streak), edit gender + country, shuffle avatar.
+- Help page (`page === "help"`): textarea (max 2000 chars) → `POST /api/help/report`. Rate-limited to 5/hour.
+- Admin panel adds **USER REPORTS / HELP** section above withdrawals: filter Open/Resolved/All, mark resolved / reopen.
+
+Roadmap (not yet built): Ship 2 friends/follows, Ship 3 chat (5s polling, 50-msg cap, EN+Hindi profanity filter), Ship 4 one-way block.
