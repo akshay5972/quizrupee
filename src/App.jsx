@@ -679,7 +679,7 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
                 <p style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.55 }}>Q{quiz.idx + 1}. {q.question}</p>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {q.options.map((opt, i) => <AnswerBtn key={i} text={opt.text} isCorrect={opt.isCorrect} onAnswer={handleAnswer} />)}
+                {q.options.map((opt, i) => <AnswerBtn key={`${quiz.idx}-${i}`} text={opt.text} isCorrect={opt.isCorrect} onAnswer={handleAnswer} />)}
               </div>
               <div style={{ marginTop: 14, textAlign: "center", fontSize: 11, color: "#1e1e30" }}>⚠️ Switching apps restarts this round</div>
             </div>
