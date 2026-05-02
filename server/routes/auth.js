@@ -46,6 +46,12 @@ router.post('/login', async (req, res) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: 'Wrong email or password' });
     }
+    const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
+    const shouldBeAdmin = !!(ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+    if (shouldBeAdmin && !user.is_admin) {
+      await pool.query('UPDATE users SET is_admin = true WHERE id = $1', [user.id]);
+      user.is_admin = true;
+    }
     const token = jwt.sign({ id: user.id, email: user.email, is_admin: user.is_admin }, JWT_SECRET, { expiresIn: '30d' });
     res.json({ token, user: safeUser(user) });
   } catch (e) {
