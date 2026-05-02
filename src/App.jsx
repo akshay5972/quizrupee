@@ -41,38 +41,11 @@ const api = async (path, { method = "GET", body } = {}) => {
   return data;
 };
 
-/* ── GEMINI API ─────────────────────────────────────────────────────────── */
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
-
+/* ── GEMINI API (via backend proxy) ─────────────────────────────────────── */
 const generateQuestions = async (categoryId) => {
-  const seed = Math.floor(Math.random() * 999999);
-  const desc = CAT_DESC[categoryId] || categoryId;
-  const prompt = `Generate exactly 10 unique multiple-choice quiz questions about: ${desc}.
-STRICT RULES:
-- Questions MUST be for children under 10 years old — very simple and basic
-- Each question must have exactly 4 answer choices
-- The CORRECT answer must ALWAYS be the FIRST item in the options array (index 0)
-- Questions must be fun, clear, and different from each other
-- Use variation seed ${seed} to make this set unique every time
-Return ONLY a raw JSON array. No markdown. No explanation. No backticks. Just the JSON:
-[{"q":"Question here?","options":["Correct answer","Wrong 1","Wrong 2","Wrong 3"]},...]
-Exactly 10 items. Nothing else.`;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 1.0, maxOutputTokens: 2048 } }),
-  });
-  if (!res.ok) { const err = await res.text(); throw new Error(`Gemini error: ${err}`); }
-  const data = await res.json();
-  const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || "").replace(/```json|```/gi, "").trim();
-  const raw = JSON.parse(text);
-  return raw.slice(0, 10).map((q) => {
-    const opts = (q.options || q.answers || []).map((t, i) => ({ text: typeof t === "string" ? t : t.text || t, isCorrect: i === 0 }));
-    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [opts[i], opts[j]] = [opts[j], opts[i]]; }
-    return { question: q.q || q.question, options: opts };
-  });
+  const data = await api("/quiz/generate", { method: "POST", body: { category: categoryId } });
+  if (!data.questions) throw new Error(data.error || "No questions returned");
+  return data.questions;
 };
 
 /* ── SMALL COMPONENTS ───────────────────────────────────────────────────── */
@@ -308,12 +281,14 @@ export default function App() {
 
   /* ── QUIZ ── */
   const startQuiz = async (catId) => {
-    if (!GEMINI_API_KEY) { setLoadErr("Add VITE_GEMINI_API_KEY to Secrets tab. Get it free at aistudio.google.com"); setPage("menu"); return; }
     setLoadErr(""); setLoadingQ(true); setResult(null); setPage("quiz");
     try {
       const questions = await generateQuestions(catId);
       setQuiz({ catId, questions, idx: 0, answers: [] });
-    } catch { setLoadErr("Couldn't load questions. Check your API key and internet."); setPage("menu"); }
+    } catch (e) {
+      setLoadErr(e.message || "Couldn't load questions. Please try again.");
+      setPage("menu");
+    }
     setLoadingQ(false);
   };
 

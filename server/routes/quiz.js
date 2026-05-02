@@ -4,6 +4,70 @@ import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
 
+const CAT_DESC = {
+  sports:        "sports, Olympics, cricket, football, tennis, basketball, famous athletes",
+  entertainment: "cartoons, Disney, Pixar, kids movies, TV shows, superheroes, popular children's characters",
+  science:       "basic science, human body, animals, plants, simple physics and chemistry concepts",
+  space:         "planets, solar system, astronauts, stars, rockets, space exploration, galaxies",
+  politics:      "Indian government, world capitals, country flags, leaders, democracy basics, Indian history",
+  history:       "world history, famous inventors, ancient civilizations, historical events and discoveries",
+  maths:         "arithmetic, geometry, multiplication tables, fractions, simple algebra, number facts",
+  geography:     "world geography, capital cities, oceans, mountains, rivers, continents, countries",
+  animals:       "animal facts, habitats, food chains, pets, wildlife, endangered species, animal behaviors",
+};
+
+router.post('/generate', authMiddleware, async (req, res) => {
+  const { category } = req.body;
+  const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Gemini API key not configured on server.' });
+
+  const desc = CAT_DESC[category] || category;
+  const seed = Math.floor(Math.random() * 999999);
+  const prompt = `Generate exactly 10 unique multiple-choice quiz questions about: ${desc}.
+STRICT RULES:
+- Questions MUST be for children under 10 years old — very simple and basic
+- Each question must have exactly 4 answer choices
+- The CORRECT answer must ALWAYS be the FIRST item in the options array (index 0)
+- Questions must be fun, clear, and different from each other
+- Use variation seed ${seed} to make this set unique every time
+Return ONLY a raw JSON array. No markdown. No explanation. No backticks. Just the JSON:
+[{"q":"Question here?","options":["Correct answer","Wrong 1","Wrong 2","Wrong 3"]},...]
+Exactly 10 items. Nothing else.`;
+
+  try {
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 1.0, maxOutputTokens: 2048 } }),
+      }
+    );
+    if (!geminiRes.ok) {
+      const err = await geminiRes.text();
+      return res.status(502).json({ error: `Gemini API error: ${err}` });
+    }
+    const data = await geminiRes.json();
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json|```/gi, '').trim();
+    const raw = JSON.parse(text);
+    const questions = raw.slice(0, 10).map(q => {
+      const opts = (q.options || q.answers || []).map((t, i) => ({
+        text: typeof t === 'string' ? t : t.text || t,
+        isCorrect: i === 0,
+      }));
+      for (let i = opts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [opts[i], opts[j]] = [opts[j], opts[i]];
+      }
+      return { question: q.q || q.question, options: opts };
+    });
+    res.json({ questions });
+  } catch (e) {
+    console.error('Gemini generate error:', e);
+    res.status(500).json({ error: e.message || 'Failed to generate questions' });
+  }
+});
+
 router.post('/complete', authMiddleware, async (req, res) => {
   const { category, score } = req.body;
   if (typeof score !== 'number' || score < 0 || score > 10) {
