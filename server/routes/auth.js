@@ -22,7 +22,7 @@ router.post('/register', async (req, res) => {
   try {
     const hash = await bcrypt.hash(password, 10);
     const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
-    const isAdmin = ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const isAdmin = !!(ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
     const result = await pool.query(
       'INSERT INTO users (name, email, password_hash, is_admin) VALUES ($1, $2, $3, $4) RETURNING *',
       [name.trim(), email.toLowerCase(), hash, isAdmin]
