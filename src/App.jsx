@@ -44,18 +44,20 @@ const BannerAd = ({ pos }) => (
   </div>
 );
 
-function AnswerBtn({ text, isCorrect, onAnswer }) {
+function AnswerBtn({ text, isCorrect, onAnswer, onLock, locked }) {
   const [state, setState] = useState("idle");
   const [done, setDone] = useState(false);
   const click = () => {
-    if (done) return;
+    if (done || locked) return;
     setDone(true);
     setState(isCorrect ? "correct" : "wrong");
+    onLock?.();
     setTimeout(() => { onAnswer(isCorrect); }, 780);
   };
   const styles = { idle: { bg: "#0e1420", border: "#1e2a4a", color: "#ccc" }, correct: { bg: "rgba(34,197,94,.14)", border: "#22c55e", color: "#22c55e" }, wrong: { bg: "rgba(239,68,68,.14)", border: "#ef4444", color: "#ef4444" } }[state];
+  const disabled = done || locked;
   return (
-    <button onClick={click} disabled={done} style={{ width: "100%", padding: "13px 16px", borderRadius: 13, border: `2px solid ${styles.border}`, background: styles.bg, color: styles.color, fontSize: 14, fontFamily: "inherit", cursor: done ? "default" : "pointer", textAlign: "left", fontWeight: 700, display: "flex", alignItems: "center", gap: 10, transition: "all .2s" }}>
+    <button onClick={click} disabled={disabled} style={{ width: "100%", padding: "13px 16px", borderRadius: 13, border: `2px solid ${styles.border}`, background: styles.bg, color: styles.color, fontSize: 14, fontFamily: "inherit", cursor: disabled ? "default" : "pointer", textAlign: "left", fontWeight: 700, display: "flex", alignItems: "center", gap: 10, transition: "all .2s" }}>
       <span style={{ fontSize: 14, flexShrink: 0 }}>{state === "correct" ? "✅" : state === "wrong" ? "❌" : "◦"}</span>{text}
     </button>
   );
@@ -116,9 +118,13 @@ export default function App() {
 
   /* quiz */
   const [quiz, setQuiz] = useState(null);
+  const [qLocked, setQLocked] = useState(false);
   const [result, setResult] = useState(null);
   const [loadingQ, setLoadingQ] = useState(false);
   const [loadErr, setLoadErr] = useState("");
+
+  // Reset the per-question answer lock whenever the question changes (or quiz ends).
+  useEffect(() => { setQLocked(false); }, [quiz?.idx, quiz === null]);
   const [switchWarn, setSwitchWarn] = useState(false);
 
   /* rewards */
@@ -679,7 +685,7 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
                 <p style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.55 }}>Q{quiz.idx + 1}. {q.question}</p>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {q.options.map((opt, i) => <AnswerBtn key={`${quiz.idx}-${i}`} text={opt.text} isCorrect={opt.isCorrect} onAnswer={handleAnswer} />)}
+                {q.options.map((opt, i) => <AnswerBtn key={`${quiz.idx}-${i}`} text={opt.text} isCorrect={opt.isCorrect} onAnswer={handleAnswer} onLock={() => setQLocked(true)} locked={qLocked} />)}
               </div>
               <div style={{ marginTop: 14, textAlign: "center", fontSize: 11, color: "#1e1e30" }}>⚠️ Switching apps restarts this round</div>
             </div>
