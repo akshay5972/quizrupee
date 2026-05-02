@@ -15,16 +15,16 @@ build = ["npm", "run", "build"]
 publicDir = "dist"
 
 [[ports]]
+localPort = 3001
+externalPort = 3001
+
+[[ports]]
 localPort = 5000
 externalPort = 80
 
 [[ports]]
 localPort = 5173
 externalPort = 80
-
-[[ports]]
-localPort = 3001
-externalPort = 3001
 
 [agent]
 expertMode = true
