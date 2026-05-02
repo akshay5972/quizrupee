@@ -183,6 +183,9 @@ export default function App() {
   const [refCopied, setRefCopied] = useState(false);
   const [signupBonus, setSignupBonus] = useState(0);
 
+  /* streak */
+  const [streakBonusNotif, setStreakBonusNotif] = useState(0);
+
   /* derived */
   const pts = user?.points || 0;
   const ptsRupees = +(pts / 10).toFixed(2);
@@ -294,7 +297,8 @@ export default function App() {
         const d = await api("/quiz/complete", { method: "POST", body: { category: quiz.catId, score } });
         setUser(d.user);
         await refreshCatStats();
-        setResult({ score, pointsEarned: d.pointsEarned, rupeesEarned: d.rupeesEarned, catId: quiz.catId });
+        if (d.streak_bonus > 0) setStreakBonusNotif(d.streak_bonus);
+        setResult({ score, pointsEarned: d.pointsEarned, rupeesEarned: d.rupeesEarned, catId: quiz.catId, streakBonus: d.streak_bonus || 0, newStreak: d.new_streak || 0 });
       } catch {
         setResult({ score, pointsEarned: score, rupeesEarned: +(score / 10).toFixed(2), catId: quiz.catId });
       }
@@ -432,6 +436,29 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* Streak banner */}
+            {(user.streak > 0 || streakBonusNotif > 0) && (
+              <div style={{ background: "linear-gradient(135deg,rgba(249,115,22,.15),rgba(239,68,68,.08))", border: "1.5px solid #f9731633", borderRadius: 14, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 13 }}>
+                <div style={{ fontSize: 32, flexShrink: 0 }}>🔥</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 900, fontSize: 15, color: "#f97316" }}>
+                    {user.streak} Day Streak!
+                    {user.streak >= 7 && <span style={{ fontSize: 12, marginLeft: 6, color: "#f59e0b" }}>🏆 Max!</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                    Play today to earn <span style={{ color: "#f97316", fontWeight: 800 }}>+{Math.min(user.streak + 1, 7) * 2} bonus pts</span> · Best: {user.longest_streak} days
+                  </div>
+                </div>
+                {streakBonusNotif > 0 && (
+                  <div style={{ background: "rgba(249,115,22,.18)", borderRadius: 9, padding: "5px 10px", textAlign: "center", flexShrink: 0 }}>
+                    <div style={{ fontSize: 10, color: "#f97316", fontWeight: 800 }}>BONUS</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: "#f97316" }}>+{streakBonusNotif}</div>
+                    <button onClick={() => setStreakBonusNotif(0)} style={{ background: "none", border: "none", color: "#555", fontSize: 11, cursor: "pointer", padding: 0, marginTop: 2, display: "block", width: "100%" }}>✕</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {signupBonus > 0 && (
               <div style={{ background: "linear-gradient(135deg,rgba(34,197,94,.15),rgba(34,197,94,.05))", border: "1.5px solid #22c55e44", borderRadius: 14, padding: "13px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
@@ -582,7 +609,14 @@ export default function App() {
             <div style={{ background: "linear-gradient(135deg,#10102a,#0a0a1e)", borderRadius: 20, padding: 22, marginBottom: 14, border: "1.5px solid #e9456033" }}>
               <div style={{ fontSize: 12, color: "#555", marginBottom: 4 }}>Points Earned</div>
               <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 40, fontWeight: 900, color: "#e94560" }}>+{result.pointsEarned} pts</div>
-              <div style={{ fontSize: 13, color: "#444", marginTop: 6 }}>= ₹{result.rupeesEarned?.toFixed ? result.rupeesEarned.toFixed(2) : result.rupeesEarned} · Your balance: {pts.toLocaleString()} pts</div>
+              {result.streakBonus > 0 && (
+                <div style={{ marginTop: 10, background: "rgba(249,115,22,.12)", borderRadius: 10, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ fontSize: 18 }}>🔥</span>
+                  <span style={{ fontSize: 13, fontWeight: 900, color: "#f97316" }}>+{result.streakBonus} streak bonus</span>
+                  <span style={{ fontSize: 11, color: "#555" }}>({result.newStreak} day streak)</span>
+                </div>
+              )}
+              <div style={{ fontSize: 13, color: "#444", marginTop: 8 }}>Your balance: {pts.toLocaleString()} pts</div>
             </div>
             <div style={{ background: "#0c0c1e", borderRadius: 14, padding: "11px 16px", marginBottom: 22, border: "1px solid #181828", fontSize: 12, color: "#444" }}>
               🎯 {1000 - pts > 0 ? `${(1000 - pts).toLocaleString()} more points to unlock ₹100 withdrawal` : "🎉 You can withdraw now!"}

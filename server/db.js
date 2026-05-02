@@ -17,8 +17,14 @@ export async function initDB() {
       total_earned NUMERIC(10,2) DEFAULT 0,
       total_withdrawn NUMERIC(10,2) DEFAULT 0,
       is_admin BOOLEAN DEFAULT FALSE,
+      streak INTEGER DEFAULT 0,
+      longest_streak INTEGER DEFAULT 0,
+      last_played_date DATE,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS streak INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS longest_streak INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_played_date DATE;
     CREATE TABLE IF NOT EXISTS quiz_sessions (
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id),

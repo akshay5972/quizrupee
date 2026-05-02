@@ -11,6 +11,7 @@ const safeUser = (u) => ({
   points: u.points, total_earned: u.total_earned,
   total_withdrawn: u.total_withdrawn, is_admin: u.is_admin,
   referral_code: u.referral_code, referral_count: u.referral_count || 0,
+  streak: u.streak || 0, longest_streak: u.longest_streak || 0,
   created_at: u.created_at,
 });
 
