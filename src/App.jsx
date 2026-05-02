@@ -289,6 +289,23 @@ export default function App() {
     setPage("dashboard"); setQuiz(null); setResult(null);
   };
 
+  const watchAd = async () => {
+    if (adWatching || adWatchesToday >= MAX_ADS) return;
+    setAdWatching(true);
+    let c = 5; setAdCountdown(c);
+    await new Promise(r => {
+      const iv = setInterval(() => { c--; setAdCountdown(c); if (c <= 0) { clearInterval(iv); r(); } }, 1000);
+    });
+    try {
+      const d = await api('/quiz/watch-ad', { method: 'POST' });
+      setUser(d.user);
+      const nc = adWatchesToday + 1;
+      setAdWatchesToday(nc);
+      localStorage.setItem('qr_ads', JSON.stringify({ date: new Date().toDateString(), count: nc }));
+    } catch {}
+    setAdWatching(false);
+  };
+
   /* ── QUIZ ── */
   const startQuiz = async (catId) => {
     if (!GEMINI_API_KEY) { setLoadErr("Add VITE_GEMINI_API_KEY to Secrets tab. Get it free at aistudio.google.com"); setPage("menu"); return; }
@@ -307,9 +324,14 @@ export default function App() {
       const score = answers.filter(Boolean).length;
       try {
         const d = await api("/quiz/complete", { method: "POST", body: { category: quiz.catId, score } });
+        const oldPts = user?.points || 0;
         setUser(d.user);
         await refreshCatStats();
         if (d.streak_bonus > 0) setStreakBonusNotif(d.streak_bonus);
+        const newPts = d.user?.points || 0;
+        for (const m of [100, 250, 500, 750, 1000, 2000, 5000]) {
+          if (oldPts < m && newPts >= m) { setMilestone(m); break; }
+        }
         setResult({ score, pointsEarned: d.pointsEarned, rupeesEarned: d.rupeesEarned, catId: quiz.catId, streakBonus: d.streak_bonus || 0, newStreak: d.new_streak || 0 });
       } catch {
         setResult({ score, pointsEarned: score, rupeesEarned: +(score / 10).toFixed(2), catId: quiz.catId });
@@ -449,6 +471,15 @@ export default function App() {
               ))}
             </div>
 
+            {/* Urgency banner */}
+            {pts >= 700 && pts < 1000 && (
+              <div style={{ background: "linear-gradient(135deg,rgba(249,115,22,.15),rgba(239,68,68,.08))", border: "1.5px solid #f9731640", borderRadius: 14, padding: "13px 16px", marginBottom: 14, textAlign: "center" }}>
+                <div style={{ fontWeight: 900, fontSize: 15, color: "#f97316", marginBottom: 3 }}>🔥 SO CLOSE TO ₹100!</div>
+                <div style={{ fontSize: 12, color: "#555", marginBottom: 10 }}>Only <span style={{ color: "#f97316", fontWeight: 900 }}>{(1000 - pts).toLocaleString()} pts</span> away — keep playing!</div>
+                <button onClick={() => setPage("menu")} style={{ padding: "9px 22px", borderRadius: 10, background: "linear-gradient(135deg,#f97316,#ef4444)", color: "#fff", fontWeight: 900, fontSize: 13, border: "none", cursor: "pointer", fontFamily: "inherit" }}>Play Now →</button>
+              </div>
+            )}
+
             {/* Streak banner */}
             {(user.streak > 0 || streakBonusNotif > 0) && (
               <div style={{ background: "linear-gradient(135deg,rgba(249,115,22,.15),rgba(239,68,68,.08))", border: "1.5px solid #f9731633", borderRadius: 14, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 13 }}>
@@ -551,10 +582,12 @@ export default function App() {
             <div style={{ fontSize: 11, color: "#252540", marginBottom: 14, padding: "9px 13px", background: "#0c0c1e", borderRadius: 10, border: "1px solid #181828", lineHeight: 1.7 }}>
               💡 10 questions · 1 pt per correct answer · 10 pts = ₹1 · Don't switch tabs!
             </div>
-            {CATEGORIES.map(cat => {
+            {CATEGORIES.map((cat, idx) => {
               const cs = catMap[cat.id];
               return (
-                <div key={cat.id} onClick={() => !loadingQ && startQuiz(cat.id)}
+                <div key={cat.id}>
+                {idx === 4 && <BannerAd pos="mid" />}
+                <div onClick={() => !loadingQ && startQuiz(cat.id)}
                   style={{ cursor: loadingQ ? "not-allowed" : "pointer", background: "#0c0c1e", borderRadius: 16, padding: "13px 15px", marginBottom: 9, border: "1.5px solid #181828", display: "flex", alignItems: "center", gap: 13, transition: "all .2s", opacity: loadingQ ? .5 : 1 }}
                   onMouseEnter={e => { if (!loadingQ) { e.currentTarget.style.borderColor = cat.color; e.currentTarget.style.background = `${cat.color}12`; } }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = "#181828"; e.currentTarget.style.background = "#0c0c1e"; }}>
@@ -565,17 +598,32 @@ export default function App() {
                   </div>
                   <div style={{ color: "#252540", fontSize: 15 }}>▶</div>
                 </div>
+                </div>
               );
             })}
+            {adWatchesToday < MAX_ADS && (
+              <button onClick={watchAd} disabled={adWatching} style={{ width: "100%", padding: "12px", borderRadius: 13, background: "rgba(59,130,246,.09)", border: "1.5px solid #3b82f620", color: "#60a5fa", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", marginTop: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                📺 Watch Ad → +15 pts <span style={{ fontSize: 11, color: "#3b82f680" }}>({MAX_ADS - adWatchesToday} left today)</span>
+              </button>
+            )}
           </div>
         )}
 
         {/* ══ QUIZ LOADING ══ */}
         {page === "quiz" && loadingQ && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, padding: 40 }}>
-            <div style={{ width: 46, height: 46, border: "4px solid #181828", borderTopColor: "#e94560", borderRadius: "50%", animation: "spin 1s linear infinite", marginBottom: 20 }} />
-            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#e94560", fontWeight: 900 }}>Gemini AI Generating...</div>
-            <div style={{ fontSize: 12, color: "#444", marginTop: 6 }}>Fresh questions just for you ✨</div>
+          <div style={{ padding: "20px 15px" }}>
+            <div style={{ background: "#0c0c1e", borderRadius: 16, padding: 18, marginBottom: 16, border: "1px solid #181828", textAlign: "center" }}>
+              <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 3, marginBottom: 12 }}>📢 ADVERTISEMENT</div>
+              <div style={{ height: 110, background: "linear-gradient(135deg,#10102a,#07070e)", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", border: "1px dashed #1a1a30", gap: 6 }}>
+                <div style={{ fontSize: 30 }}>🎮</div>
+                <div style={{ fontSize: 10, color: "#1e1e38", fontWeight: 800 }}>AD SPACE · 320×110</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 0" }}>
+              <div style={{ width: 44, height: 44, border: "4px solid #181828", borderTopColor: "#e94560", borderRadius: "50%", animation: "spin 1s linear infinite", marginBottom: 16 }} />
+              <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#e94560", fontWeight: 900 }}>Gemini AI Generating...</div>
+              <div style={{ fontSize: 12, color: "#444", marginTop: 6 }}>Fresh questions just for you ✨</div>
+            </div>
           </div>
         )}
 
@@ -630,8 +678,13 @@ export default function App() {
               )}
               <div style={{ fontSize: 13, color: "#444", marginTop: 8 }}>Your balance: {pts.toLocaleString()} pts</div>
             </div>
-            <div style={{ background: "#0c0c1e", borderRadius: 14, padding: "11px 16px", marginBottom: 22, border: "1px solid #181828", fontSize: 12, color: "#444" }}>
-              🎯 {1000 - pts > 0 ? `${(1000 - pts).toLocaleString()} more points to unlock ₹100 withdrawal` : "🎉 You can withdraw now!"}
+            {adWatchesToday < MAX_ADS && (
+              <button onClick={watchAd} disabled={adWatching} style={{ width: "100%", padding: "12px", borderRadius: 13, background: "linear-gradient(135deg,rgba(59,130,246,.18),rgba(59,130,246,.08))", border: "1.5px solid #3b82f650", color: "#60a5fa", fontWeight: 900, fontSize: 14, cursor: "pointer", fontFamily: "inherit", marginBottom: 11, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                📺 Watch Ad → +15 pts &nbsp;<span style={{ fontSize: 11, color: "#3b82f6", fontWeight: 700 }}>({MAX_ADS - adWatchesToday} left today)</span>
+              </button>
+            )}
+            <div style={{ background: pts >= 800 && pts < 1000 ? "rgba(249,115,22,.1)" : "#0c0c1e", border: `1px solid ${pts >= 800 && pts < 1000 ? "#f9731640" : "#181828"}`, borderRadius: 14, padding: "11px 16px", marginBottom: 14, fontSize: 12, color: pts >= 800 && pts < 1000 ? "#f97316" : "#444", fontWeight: pts >= 800 && pts < 1000 ? 800 : 400 }}>
+              {pts >= 1000 ? "🎉 You can withdraw now! Go to Rewards tab." : pts >= 800 ? `🔥 SO CLOSE! Only ${(1000 - pts).toLocaleString()} more pts for ₹100 withdrawal!` : `🎯 ${(1000 - pts).toLocaleString()} more points to unlock ₹100 withdrawal`}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11 }}>
               <button onClick={() => { setResult(null); setPage("menu"); }} style={{ padding: 14, borderRadius: 13, background: "#0c0c1e", color: "#aaa", fontSize: 14, fontWeight: 800, border: "1.5px solid #181828", cursor: "pointer", fontFamily: "inherit" }}>Other Categories</button>
@@ -655,6 +708,20 @@ export default function App() {
               <div style={{ fontSize: 11, color: "#444" }}>
                 {pts < 1000 ? `${(1000 - pts).toLocaleString()} more points to unlock withdrawal` : "🎉 Ready to withdraw!"}
               </div>
+            </div>
+
+            {/* Watch Ad Card */}
+            <div style={{ background: "linear-gradient(135deg,rgba(59,130,246,.12),rgba(59,130,246,.04))", border: "1.5px solid #3b82f628", borderRadius: 16, padding: 18, marginBottom: 14, textAlign: "center" }}>
+              <div style={{ fontSize: 26, marginBottom: 6 }}>📺</div>
+              <div style={{ fontWeight: 900, fontSize: 15, color: "#60a5fa", marginBottom: 3 }}>Watch Ad → +15 pts</div>
+              <div style={{ fontSize: 11, color: "#444", marginBottom: 12 }}>{adWatchesToday >= MAX_ADS ? "Come back tomorrow for more!" : `${MAX_ADS - adWatchesToday} of ${MAX_ADS} free watches left today`}</div>
+              <div style={{ background: "#0c0c1e", borderRadius: 6, height: 5, marginBottom: 12, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: "linear-gradient(90deg,#3b82f6,#60a5fa)", width: `${((MAX_ADS - adWatchesToday) / MAX_ADS) * 100}%`, transition: "width .4s" }} />
+              </div>
+              <button onClick={watchAd} disabled={adWatching || adWatchesToday >= MAX_ADS}
+                style={{ width: "100%", padding: "12px", borderRadius: 11, background: adWatchesToday >= MAX_ADS ? "#181828" : "linear-gradient(135deg,#3b82f6,#1d4ed8)", color: adWatchesToday >= MAX_ADS ? "#444" : "#fff", fontWeight: 900, fontSize: 14, border: "none", cursor: adWatchesToday >= MAX_ADS ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {adWatchesToday >= MAX_ADS ? "✅ All done for today" : "📺 Watch Ad Now"}
+              </button>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
@@ -871,6 +938,37 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {/* ── AD WATCHING COUNTDOWN ── */}
+      {adWatching && (
+        <div className="overlay">
+          <div className="modal" style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 44, marginBottom: 12 }}>📺</div>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 14, fontWeight: 900, color: "#60a5fa", marginBottom: 6 }}>Watching Ad...</div>
+            <div style={{ width: 72, height: 72, borderRadius: "50%", background: "rgba(59,130,246,.12)", border: "3px solid #3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "16px auto" }}>
+              <span style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 28, fontWeight: 900, color: "#60a5fa" }}>{adCountdown}</span>
+            </div>
+            <p style={{ fontSize: 13, color: "#444", lineHeight: 1.6 }}>Stay with us to earn <span style={{ color: "#60a5fa", fontWeight: 900 }}>+15 pts</span></p>
+          </div>
+        </div>
+      )}
+
+      {/* ── MILESTONE CELEBRATION ── */}
+      {milestone && (
+        <div className="overlay" onClick={() => setMilestone(null)}>
+          <div className="modal" style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 58, marginBottom: 10 }}>🎉</div>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, fontWeight: 900, color: "#f59e0b", letterSpacing: 2, marginBottom: 6 }}>MILESTONE!</div>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 34, fontWeight: 900, color: "#e94560", marginBottom: 6 }}>{milestone.toLocaleString()} pts</div>
+            <p style={{ fontSize: 13, color: "#555", lineHeight: 1.65, marginBottom: 20 }}>
+              {milestone >= 1000 ? "🏆 You can now withdraw ₹100! Go to Rewards tab." : `Amazing! You're on your way to ₹${Math.floor(milestone / 100)}. Keep going!`}
+            </p>
+            <button onClick={() => { setMilestone(null); if (milestone >= 1000) setPage("rewards"); }} style={{ width: "100%", padding: 14, borderRadius: 13, background: "linear-gradient(135deg,#f59e0b,#e67e22)", color: "#000", fontWeight: 900, fontSize: 15, border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+              {milestone >= 1000 ? "Withdraw Now 💰" : "Keep Earning! 🚀"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── SWITCH WARNING ── */}
       {switchWarn && (
