@@ -178,6 +178,11 @@ export default function App() {
   const [adminNotes, setAdminNotes] = useState({});
   const [adminLoading, setAdminLoading] = useState(false);
 
+  /* referral */
+  const [refCode] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
+  const [refCopied, setRefCopied] = useState(false);
+  const [signupBonus, setSignupBonus] = useState(0);
+
   /* derived */
   const pts = user?.points || 0;
   const ptsRupees = +(pts / 10).toFixed(2);
@@ -252,12 +257,13 @@ export default function App() {
     try {
       const endpoint = authMode === "signup" ? "/auth/register" : "/auth/login";
       const body = authMode === "signup"
-        ? { name: form.name, email: form.email, password: form.password }
+        ? { name: form.name, email: form.email, password: form.password, ...(refCode ? { ref_code: refCode } : {}) }
         : { email: form.email, password: form.password };
       const d = await api(endpoint, { method: "POST", body });
       localStorage.setItem("qr_token", d.token);
       setToken(d.token);
       setUser(d.user);
+      if (authMode === "signup" && d.bonus_points > 0) setSignupBonus(d.bonus_points);
     } catch (e) { setAuthErr(e.message); }
     setAuthBusy(false);
   };
@@ -417,6 +423,44 @@ export default function App() {
                   <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>{l}</div>
                 </div>
               ))}
+            </div>
+
+            {signupBonus > 0 && (
+              <div style={{ background: "linear-gradient(135deg,rgba(34,197,94,.15),rgba(34,197,94,.05))", border: "1.5px solid #22c55e44", borderRadius: 14, padding: "13px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 28, flexShrink: 0 }}>🎁</div>
+                <div>
+                  <div style={{ fontWeight: 900, color: "#22c55e", fontSize: 14 }}>+{signupBonus} Bonus Points!</div>
+                  <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>You signed up via a referral link. Enjoy your welcome bonus!</div>
+                </div>
+                <button onClick={() => setSignupBonus(0)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#333", fontSize: 18, cursor: "pointer", flexShrink: 0 }}>✕</button>
+              </div>
+            )}
+
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, marginBottom: 10 }}>🔗 REFERRAL LINK</div>
+              <div style={{ fontSize: 12, color: "#555", marginBottom: 10, lineHeight: 1.6 }}>
+                Share your link — friends get <span style={{ color: "#22c55e", fontWeight: 800 }}>+10 pts</span> on signup, you get <span style={{ color: "#f59e0b", fontWeight: 800 }}>+20 pts</span> per referral!
+              </div>
+              {user.referral_code ? (
+                <>
+                  <div style={{ background: "#07070e", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#e94560", fontFamily: "monospace", marginBottom: 10, wordBreak: "break-all", border: "1px solid #1a1a30" }}>
+                    {`${window.location.origin}?ref=${user.referral_code}`}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}?ref=${user.referral_code}`); setRefCopied(true); setTimeout(() => setRefCopied(false), 2000); }}
+                      style={{ flex: 1, padding: "10px", borderRadius: 10, background: refCopied ? "rgba(34,197,94,.15)" : "#0c0c1e", border: `1.5px solid ${refCopied ? "#22c55e" : "#252540"}`, color: refCopied ? "#22c55e" : "#aaa", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all .2s" }}>
+                      {refCopied ? "✅ Copied!" : "📋 Copy Link"}
+                    </button>
+                    {user.referral_count > 0 && (
+                      <div style={{ background: "rgba(245,158,11,.1)", border: "1.5px solid #f59e0b33", borderRadius: 10, padding: "10px 14px", fontSize: 12, fontWeight: 800, color: "#f59e0b", whiteSpace: "nowrap" }}>
+                        👥 {user.referral_count} referred
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: "#444" }}>Log out and back in to generate your link.</div>
+              )}
             </div>
 
             <div style={{ fontSize: 10, fontWeight: 800, color: "#252540", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Category Records</div>
