@@ -391,6 +391,17 @@ export default function App() {
       <style>{STYLES}</style>
       <BannerAd pos="top" />
 
+      {/* ── GLOBAL HEADER ── */}
+      <div style={{ padding: "10px 15px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #141428", background: "#09091a", flexShrink: 0 }}>
+        <div>
+          <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 15, fontWeight: 900, color: "#e94560" }}>QuizRupee</div>
+          <div style={{ fontSize: 11, color: "#3a3a5a", marginTop: 1 }}>👤 {user.name?.split(" ")[0]} · <span style={{ color: "#e94560", fontWeight: 800 }}>{pts.toLocaleString()} pts</span></div>
+        </div>
+        <button onClick={logout} style={{ background: "rgba(233,69,96,.12)", border: "1.5px solid #e9456050", borderRadius: 10, color: "#e94560", fontWeight: 900, fontSize: 13, cursor: "pointer", padding: "8px 16px", fontFamily: "inherit" }}>
+          Sign Out
+        </button>
+      </div>
+
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 68 }}>
 
         {/* ══ DASHBOARD ══ */}
@@ -398,16 +409,13 @@ export default function App() {
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
               <div>
-                <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 19, fontWeight: 900, color: "#e94560" }}>QuizRupee</div>
-                <div style={{ fontSize: 12, color: "#444", marginTop: 1 }}>Hey {user.name?.split(" ")[0]} 👋</div>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>Hey {user.name?.split(" ")[0]} 👋</div>
+                <div style={{ fontSize: 12, color: "#444", marginTop: 2 }}>Ready to earn today?</div>
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <div style={{ background: "#0c0c1e", borderRadius: 12, padding: "7px 12px", border: "1.5px solid #e9456022", textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: "#e94560", fontWeight: 800, letterSpacing: 1 }}>POINTS</div>
-                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 16, fontWeight: 900, color: "#e94560" }}>{pts.toLocaleString()}</div>
-                  <div style={{ fontSize: 9, color: "#444" }}>= ₹{ptsRupees.toFixed(2)}</div>
-                </div>
-                <button onClick={logout} title="Log out" style={{ background: "#0c0c1e", border: "1px solid #181828", borderRadius: 10, color: "#444", fontSize: 17, cursor: "pointer", padding: "8px 10px" }}>⏻</button>
+              <div style={{ background: "#0c0c1e", borderRadius: 12, padding: "7px 14px", border: "1.5px solid #e9456022", textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: "#e94560", fontWeight: 800, letterSpacing: 1 }}>BALANCE</div>
+                <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 16, fontWeight: 900, color: "#e94560" }}>{pts.toLocaleString()}</div>
+                <div style={{ fontSize: 9, color: "#444" }}>= ₹{ptsRupees.toFixed(2)}</div>
               </div>
             </div>
 
