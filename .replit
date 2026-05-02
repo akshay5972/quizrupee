@@ -33,7 +33,7 @@ expertMode = true
 [userenv]
 
 [userenv.shared]
-VITE_GEMINI_API_KEY = "AIzaSyDLmkt_w-ZgP89bg7nW5u6p446_pyzy1tg"
+VITE_GEMINI_API_KEY = "AIzaSyDu7rALsIafpy5x3vZVQEeghHkLwuLobsk"
 JWT_SECRET = "quizrupee_jwt_secret_07gz0r0jx3tg"
 ADMIN_EMAIL = "akumar123abc@gmail.com"
 
