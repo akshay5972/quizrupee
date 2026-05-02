@@ -206,6 +206,17 @@ export default function App() {
   const [reportsFilter, setReportsFilter] = useState("open");
   const [reportsCounts, setReportsCounts] = useState({ open: 0, resolved: 0 });
 
+  /* friends / follows */
+  const [friendsTab, setFriendsTab] = useState("friends");
+  const [friendsList, setFriendsList] = useState([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendCounts, setFriendCounts] = useState({ friends: 0, following: 0, followers: 0 });
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [viewProfile, setViewProfile] = useState(null);
+  const [viewBusy, setViewBusy] = useState(false);
+
   /* referral */
   const [refCode] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
   const [refCopied, setRefCopied] = useState(false);
@@ -278,6 +289,7 @@ export default function App() {
     if (page === "profile") {
       setProfileEdit({ gender: user?.gender || "", country: user?.country || "" });
       setProfileMsg("");
+      api("/follows/me/counts").then(c => setFriendCounts(c)).catch(() => {});
     }
     if (page === "help") setHelpStatus("");
   }, [page, user?.gender, user?.country]);
@@ -289,6 +301,83 @@ export default function App() {
       .then(d => { setReports(d.reports || []); setReportsCounts(d.counts || { open: 0, resolved: 0 }); })
       .catch(() => {});
   }, [page, reportsFilter, user?.is_admin]);
+
+  /* fetch friends/follows lists */
+  const loadFriendsList = async (tab = friendsTab) => {
+    setFriendsLoading(true);
+    try {
+      const path = tab === "friends" ? "/follows/me/friends"
+                 : tab === "following" ? "/follows/me/following"
+                 : tab === "followers" ? "/follows/me/followers" : null;
+      if (path) {
+        const d = await api(path);
+        setFriendsList(d.users || []);
+      }
+      const c = await api("/follows/me/counts");
+      setFriendCounts(c);
+    } catch {}
+    setFriendsLoading(false);
+  };
+
+  useEffect(() => {
+    if (page !== "friends" || !user) return;
+    if (friendsTab === "find") return;
+    loadFriendsList(friendsTab);
+  }, [page, friendsTab, user?.id]);
+
+  /* user search (debounced) */
+  useEffect(() => {
+    if (page !== "friends" || friendsTab !== "find") return;
+    const q = searchQ.trim();
+    if (q.length < 2) { setSearchResults([]); return; }
+    setSearchBusy(true);
+    const t = setTimeout(() => {
+      api(`/follows/search?q=${encodeURIComponent(q)}`)
+        .then(d => setSearchResults(d.users || []))
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearchBusy(false));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchQ, friendsTab, page]);
+
+  const openUserProfile = async (userId) => {
+    setViewProfile({ loading: true, id: userId });
+    setViewBusy(false);
+    try {
+      const d = await api(`/profile/${userId}`);
+      setViewProfile(d.profile);
+    } catch (e) {
+      setViewProfile({ error: e.message, id: userId });
+    }
+  };
+
+  const toggleFollow = async (target, currentlyFollowing) => {
+    setViewBusy(true);
+    // optimistic update — flip i_follow in any list/modal rendering this user
+    const flip = (u) => u.id === target.id ? { ...u, i_follow: !currentlyFollowing,
+      follower_count: Math.max(0, (u.follower_count ?? 0) + (currentlyFollowing ? -1 : 1)) } : u;
+    setSearchResults(rs => rs.map(flip));
+    setFriendsList(rs => rs.map(flip));
+    if (viewProfile?.id === target.id) setViewProfile(p => flip(p));
+    setFriendCounts(c => ({ ...c,
+      following: Math.max(0, c.following + (currentlyFollowing ? -1 : 1)),
+      friends: target.follows_me ? Math.max(0, c.friends + (currentlyFollowing ? -1 : 1)) : c.friends }));
+    try {
+      await api(`/follows/${target.id}`, { method: currentlyFollowing ? "DELETE" : "POST" });
+      // soft-refresh counts to stay accurate
+      const c = await api("/follows/me/counts");
+      setFriendCounts(c);
+    } catch (e) {
+      alert(e.message);
+      // rollback on failure
+      const undo = (u) => u.id === target.id ? { ...u, i_follow: currentlyFollowing,
+        follower_count: Math.max(0, (u.follower_count ?? 0) + (currentlyFollowing ? 1 : -1)) } : u;
+      setSearchResults(rs => rs.map(undo));
+      setFriendsList(rs => rs.map(undo));
+      if (viewProfile?.id === target.id) setViewProfile(p => undo(p));
+    }
+    setViewBusy(false);
+  };
 
   const adminResolveReport = async (id, status) => {
     try {
@@ -581,8 +670,9 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
   const navItems = [
     ["dashboard", "🏠", "Home"],
     ["menu", "🎮", "Play"],
+    ["friends", "👥", "Friends"],
     ["rewards", "💎", "Earn"],
-    ["global", "🌍", "Global"],
+    ["global", "🌍", "Top"],
     ...(user.is_admin ? [["admin", "⚙️", "Admin"]] : []),
   ];
 
@@ -1022,6 +1112,97 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
           </div>
         )}
 
+        {/* ══ FRIENDS ══ */}
+        {page === "friends" && (
+          <div style={{ padding: "18px 15px 12px", animation: "fadeUp .35s ease" }}>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 17, fontWeight: 900, color: "#a855f7", marginBottom: 4 }}>👥 Friends</div>
+            <div style={{ fontSize: 12, color: "#444", marginBottom: 14 }}>Follow other quizzers. Mutual follows = friends.</div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+              <button onClick={() => setFriendsTab("friends")}
+                style={{ padding: "10px 4px", borderRadius: 11, border: `1.5px solid ${friendsTab === "friends" ? "#a855f7" : "#1a2238"}`, background: friendsTab === "friends" ? "rgba(168,85,247,.14)" : "#07070e", color: friendsTab === "friends" ? "#a855f7" : "#888", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                Friends · {friendCounts.friends}
+              </button>
+              <button onClick={() => setFriendsTab("following")}
+                style={{ padding: "10px 4px", borderRadius: 11, border: `1.5px solid ${friendsTab === "following" ? "#3b82f6" : "#1a2238"}`, background: friendsTab === "following" ? "rgba(59,130,246,.14)" : "#07070e", color: friendsTab === "following" ? "#60a5fa" : "#888", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                Following · {friendCounts.following}
+              </button>
+              <button onClick={() => setFriendsTab("followers")}
+                style={{ padding: "10px 4px", borderRadius: 11, border: `1.5px solid ${friendsTab === "followers" ? "#f59e0b" : "#1a2238"}`, background: friendsTab === "followers" ? "rgba(245,158,11,.14)" : "#07070e", color: friendsTab === "followers" ? "#f59e0b" : "#888", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                Followers · {friendCounts.followers}
+              </button>
+            </div>
+
+            <button onClick={() => setFriendsTab("find")}
+              style={{ width: "100%", padding: 11, borderRadius: 12, border: "none", background: friendsTab === "find" ? "linear-gradient(135deg,#22c55e,#16a34a)" : "rgba(34,197,94,.12)", color: friendsTab === "find" ? "#000" : "#22c55e", fontWeight: 900, fontSize: 13, cursor: "pointer", fontFamily: "inherit", marginBottom: 12 }}>
+              🔍 Find People
+            </button>
+
+            {friendsTab === "find" ? (
+              <>
+                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search by name or email..."
+                  style={{ width: "100%", padding: "12px 16px", background: "#07070e", border: "1.5px solid #1a2238", borderRadius: 12, color: "#e0e0e0", fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 12 }} />
+                {searchQ.trim().length < 2 && <div style={{ color: "#444", fontSize: 12, textAlign: "center", padding: "30px 0" }}>Type at least 2 characters to search.</div>}
+                {searchQ.trim().length >= 2 && searchBusy && <div style={{ color: "#666", fontSize: 12, textAlign: "center", padding: "16px 0" }}>Searching...</div>}
+                {searchQ.trim().length >= 2 && !searchBusy && searchResults.length === 0 && (
+                  <div style={{ color: "#444", fontSize: 12, textAlign: "center", padding: "30px 0" }}>No users found for "{searchQ}".</div>
+                )}
+                {searchResults.map(u => (
+                  <div key={u.id} onClick={() => openUserProfile(u.id)} className="card" style={{ marginBottom: 8, padding: 12, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+                    <Avatar seed={u.avatar_seed} gender={u.gender} size={46} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, fontSize: 14, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                      <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>
+                        {u.country && <>📍 {u.country} · </>}{u.follower_count} followers
+                        {u.follows_me && <span style={{ color: "#a855f7", marginLeft: 6, fontWeight: 800 }}>· follows you</span>}
+                      </div>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); toggleFollow(u, u.i_follow); }}
+                      style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: u.i_follow ? "#1a1a30" : "linear-gradient(135deg,#a855f7,#7c3aed)", color: u.i_follow ? "#888" : "#fff", fontWeight: 900, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                      {u.i_follow ? "Following" : "+ Follow"}
+                    </button>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <>
+                {friendsLoading && <div style={{ color: "#666", fontSize: 12, textAlign: "center", padding: "30px 0" }}>Loading...</div>}
+                {!friendsLoading && friendsList.length === 0 && (
+                  <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "30px 0", lineHeight: 1.6 }}>
+                    {friendsTab === "friends" && <>No friends yet. <br/>Mutual follows show up here.</>}
+                    {friendsTab === "following" && <>You're not following anyone yet. <br/>Tap "Find People" to discover.</>}
+                    {friendsTab === "followers" && <>No followers yet. Share QuizRupee with friends!</>}
+                  </div>
+                )}
+                {friendsList.map(u => (
+                  <div key={u.id} onClick={() => openUserProfile(u.id)} className="card" style={{ marginBottom: 8, padding: 12, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+                    <Avatar seed={u.avatar_seed} gender={u.gender} size={46} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, fontSize: 14, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                      <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>
+                        {u.country && <>📍 {u.country} · </>}{u.follower_count} followers
+                        {friendsTab !== "friends" && u.i_follow && u.follows_me && <span style={{ color: "#a855f7", marginLeft: 6, fontWeight: 800 }}>· friends</span>}
+                        {friendsTab === "followers" && !u.i_follow && <span style={{ color: "#f59e0b", marginLeft: 6, fontWeight: 800 }}>· follow back</span>}
+                      </div>
+                    </div>
+                    {friendsTab === "followers" && !u.i_follow ? (
+                      <button onClick={e => { e.stopPropagation(); toggleFollow(u, false); }}
+                        style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#a855f7,#7c3aed)", color: "#fff", fontWeight: 900, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                        + Follow
+                      </button>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); toggleFollow(u, u.i_follow); }}
+                        style={{ padding: "8px 12px", borderRadius: 10, border: "1.5px solid #1a2238", background: "transparent", color: u.i_follow ? "#888" : "#a855f7", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                        {u.i_follow ? "Following" : "+ Follow"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+
         {/* ══ PROFILE ══ */}
         {page === "profile" && (
           <div style={{ padding: "18px 15px", animation: "fadeUp .35s ease" }}>
@@ -1040,7 +1221,7 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
               <div className="card" style={{ textAlign: "center", padding: 10 }}>
                 <div style={{ fontSize: 16, fontWeight: 900, color: "#e94560" }}>{pts.toLocaleString()}</div>
                 <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>POINTS</div>
@@ -1052,6 +1233,21 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
               <div className="card" style={{ textAlign: "center", padding: 10 }}>
                 <div style={{ fontSize: 16, fontWeight: 900, color: "#f59e0b" }}>{user.streak || 0}🔥</div>
                 <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>STREAK</div>
+              </div>
+            </div>
+
+            <div onClick={() => setPage("friends")} className="card" style={{ marginBottom: 14, padding: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, cursor: "pointer", border: "1px solid #a855f733" }}>
+              <div style={{ textAlign: "center", borderRight: "1px solid #181828" }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: "#a855f7" }}>{friendCounts.friends}</div>
+                <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>FRIENDS</div>
+              </div>
+              <div style={{ textAlign: "center", borderRight: "1px solid #181828" }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: "#60a5fa" }}>{friendCounts.following}</div>
+                <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>FOLLOWING</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: "#f59e0b" }}>{friendCounts.followers}</div>
+                <div style={{ fontSize: 9, color: "#252540", fontWeight: 800, letterSpacing: 1 }}>FOLLOWERS</div>
               </div>
             </div>
 
@@ -1342,6 +1538,68 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
         </div>
       )}
 
+      {/* ── USER PROFILE MODAL ── */}
+      {viewProfile && (
+        <div className="overlay" onClick={() => setViewProfile(null)}>
+          <div className="modal" style={{ textAlign: "left", maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            {viewProfile.loading ? (
+              <div style={{ padding: 30, textAlign: "center", color: "#666" }}>Loading...</div>
+            ) : viewProfile.error ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#ef4444" }}>{viewProfile.error}</div>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                  <Avatar seed={viewProfile.avatar_seed} gender={viewProfile.gender} size={76} ring="#a855f7" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: 18, color: "#fff" }}>{viewProfile.name}</div>
+                    <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {viewProfile.country && <span className="tag" style={{ background: "rgba(59,130,246,.1)", color: "#60a5fa", border: "1px solid #3b82f633" }}>📍 {viewProfile.country}</span>}
+                      {viewProfile.gender && <span className="tag" style={{ background: "rgba(233,69,96,.12)", color: "#e94560", border: "1px solid #e9456033" }}>{viewProfile.gender === "male" ? "♂" : viewProfile.gender === "female" ? "♀" : "🧑"}</span>}
+                    </div>
+                    {viewProfile.follows_me && !viewProfile.is_me && (
+                      <div style={{ fontSize: 10, color: "#a855f7", fontWeight: 800, marginTop: 4 }}>✦ Follows you</div>
+                    )}
+                  </div>
+                  <button onClick={() => setViewProfile(null)} style={{ background: "none", border: "none", color: "#666", fontSize: 22, cursor: "pointer", padding: 0, alignSelf: "flex-start" }}>✕</button>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 14 }}>
+                  <div className="card" style={{ textAlign: "center", padding: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#a855f7" }}>{viewProfile.follower_count ?? 0}</div>
+                    <div style={{ fontSize: 9, color: "#252540", fontWeight: 800 }}>FOLLOWERS</div>
+                  </div>
+                  <div className="card" style={{ textAlign: "center", padding: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#60a5fa" }}>{viewProfile.following_count ?? 0}</div>
+                    <div style={{ fontSize: 9, color: "#252540", fontWeight: 800 }}>FOLLOWING</div>
+                  </div>
+                  <div className="card" style={{ textAlign: "center", padding: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#f59e0b" }}>{viewProfile.streak || 0}🔥</div>
+                    <div style={{ fontSize: 9, color: "#252540", fontWeight: 800 }}>STREAK</div>
+                  </div>
+                </div>
+
+                {viewProfile.is_me ? (
+                  <button onClick={() => { setViewProfile(null); setPage("profile"); }}
+                    style={{ width: "100%", padding: 12, borderRadius: 12, border: "1.5px solid #1a2238", background: "transparent", color: "#888", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                    This is you · Open Profile
+                  </button>
+                ) : (
+                  <button onClick={() => toggleFollow(viewProfile, viewProfile.i_follow)} disabled={viewBusy}
+                    style={{ width: "100%", padding: 13, borderRadius: 12, border: "none", background: viewBusy ? "#1a1a30" : (viewProfile.i_follow ? "#1a1a30" : "linear-gradient(135deg,#a855f7,#7c3aed)"), color: viewProfile.i_follow ? "#aaa" : "#fff", fontWeight: 900, fontSize: 14, cursor: viewBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                    {viewBusy ? "..." : viewProfile.i_follow ? "✓ Following — tap to unfollow" : "+ Follow"}
+                  </button>
+                )}
+                {viewProfile.i_follow && viewProfile.follows_me && !viewProfile.is_me && (
+                  <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(168,85,247,.1)", border: "1px solid #a855f733", color: "#a855f7", fontSize: 11, fontWeight: 700, textAlign: "center" }}>
+                    ✦ You two are friends
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── SIDE MENU ── */}
       {sideOpen && (
         <div onClick={() => setSideOpen(false)}
@@ -1359,6 +1617,7 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
 
             {[
               ["profile", "👤", "Profile"],
+              ["friends", "👥", "Friends"],
               ["help",    "🆘", "Help / Report"],
             ].map(([id, ic, lbl]) => (
               <button key={id} onClick={() => { setPage(id); setSideOpen(false); }}

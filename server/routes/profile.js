@@ -68,13 +68,31 @@ router.get('/:userId', authMiddleware, async (req, res) => {
   if (!Number.isFinite(uid)) return res.status(400).json({ error: 'Invalid user id' });
   try {
     const r = await pool.query(
-      `SELECT u.id, u.name, u.created_at, p.gender, p.country, p.avatar_seed
+      `SELECT u.id, u.name, u.created_at, u.points, u.total_earned, u.streak,
+              p.gender, p.country, p.avatar_seed,
+              (SELECT COUNT(*)::int FROM follows WHERE followee_id = u.id) AS follower_count,
+              (SELECT COUNT(*)::int FROM follows WHERE follower_id = u.id) AS following_count,
+              EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = u.id) AS i_follow,
+              EXISTS(SELECT 1 FROM follows WHERE follower_id = u.id AND followee_id = $2) AS follows_me
        FROM users u LEFT JOIN profiles p ON p.user_id = u.id
        WHERE u.id = $1`,
-      [uid]
+      [uid, req.user.id]
     );
     if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
-    res.json({ profile: publicProfile(r.rows[0]) });
+    const row = r.rows[0];
+    res.json({
+      profile: {
+        ...publicProfile(row),
+        points: row.points,
+        total_earned: row.total_earned,
+        streak: row.streak,
+        follower_count: row.follower_count,
+        following_count: row.following_count,
+        i_follow: row.i_follow,
+        follows_me: row.follows_me,
+        is_me: row.id === req.user.id,
+      },
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });

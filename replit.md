@@ -63,8 +63,9 @@ server/
     withdraw.js         # Request withdrawal, history
     admin.js            # Admin stats, withdrawals, question-bank, user reports
     leaderboard.js      # Overall and category leaderboards
-    profile.js          # GET/PATCH /me, GET /:userId — gender, country, avatar_seed (DiceBear)
+    profile.js          # GET/PATCH /me, GET /:userId — gender, country, avatar_seed, follow info
     help.js             # POST /report (text-only user help/report), GET /my-reports
+    follows.js          # POST/DELETE /:userId, GET /me/{friends,following,followers,counts}, /search
 
 src/
   App.jsx               # Complete React frontend (single file)
@@ -82,6 +83,7 @@ vite.config.js          # Proxy /api/* → localhost:3001
 - `user_seen_questions` — (user_id, question_id) PK pair, ON DELETE CASCADE → cached_questions
 - `profiles` — user_id PK FK→users, gender (male|female|other), country, avatar_seed, updated_at
 - `reports` — id, user_id, message, status (open|resolved), admin_note, created_at, resolved_at
+- `follows` — (follower_id, followee_id) PK, CHECK (follower<>followee), CASCADE on user delete
 
 ## Social / Profile (Ship 1)
 
@@ -92,4 +94,15 @@ vite.config.js          # Proxy /api/* → localhost:3001
 - Help page (`page === "help"`): textarea (max 2000 chars) → `POST /api/help/report`. Rate-limited to 5/hour.
 - Admin panel adds **USER REPORTS / HELP** section above withdrawals: filter Open/Resolved/All, mark resolved / reopen.
 
-Roadmap (not yet built): Ship 2 friends/follows, Ship 3 chat (5s polling, 50-msg cap, EN+Hindi profanity filter), Ship 4 one-way block.
+## Friends / Follows (Ship 2)
+
+- One-way **follow** model. **Friends** = mutual follows.
+- Endpoints (`/api/follows`, all auth-required):
+  - `POST /:userId` — follow (idempotent via `ON CONFLICT DO NOTHING`)
+  - `DELETE /:userId` — unfollow
+  - `GET /me/{friends,following,followers,counts}` — own lists + counts
+  - `GET /search?q=` — find users by name/email (min 2 chars, escapes `%_`)
+- `GET /api/profile/:userId` returns `i_follow`, `follows_me`, `follower_count`, `following_count`, `is_me` so the UI can render the right Follow/Unfollow CTA.
+- Frontend: bottom nav has new **Friends** tab (👥) with sub-tabs Friends / Following / Followers / Find People (debounced search). Tapping any user opens a profile modal with stats and Follow/Unfollow. Profile page also shows a 3-stat bar (Friends / Following / Followers) that links to the Friends tab.
+
+Roadmap (not yet built): Ship 3 chat (mutual-only, 5s polling, 50-msg cap, EN+Hindi profanity filter), Ship 4 one-way block.
