@@ -54,6 +54,22 @@ export async function initDB() {
       points_earned INTEGER DEFAULT 0,
       UNIQUE(user_id, category)
     );
+    CREATE TABLE IF NOT EXISTS cached_questions (
+      id SERIAL PRIMARY KEY,
+      category VARCHAR(50) NOT NULL,
+      question TEXT NOT NULL,
+      options JSONB NOT NULL,
+      question_hash VARCHAR(64) UNIQUE NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cached_questions_category ON cached_questions(category);
+    CREATE TABLE IF NOT EXISTS user_seen_questions (
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      question_id INTEGER REFERENCES cached_questions(id) ON DELETE CASCADE,
+      seen_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY (user_id, question_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_seen_user ON user_seen_questions(user_id);
   `);
   console.log('Database initialized');
 }

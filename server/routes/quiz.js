@@ -1,8 +1,22 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { pool } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
+
+function hashQuestion(text) {
+  return crypto.createHash('sha256').update(text.toLowerCase().trim().replace(/\s+/g, ' ')).digest('hex').slice(0, 32);
+}
+
+function shuffleOptions(opts) {
+  const arr = opts.map(o => ({ text: o.text, isCorrect: !!o.isCorrect }));
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 const CAT_DESC = {
   sports:        "sports, Olympics, cricket, football, tennis, basketball, famous athletes",
@@ -16,11 +30,7 @@ const CAT_DESC = {
   animals:       "animal facts, habitats, food chains, pets, wildlife, endangered species, animal behaviors",
 };
 
-router.post('/generate', authMiddleware, async (req, res) => {
-  const { category } = req.body;
-  const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Gemini API key not configured on server.' });
-
+async function callGemini(category, apiKey) {
   const desc = CAT_DESC[category] || category;
   const seed = Math.floor(Math.random() * 999999);
   const prompt = `Generate exactly 10 unique multiple-choice quiz questions about: ${desc}.
@@ -34,36 +44,131 @@ Return ONLY a raw JSON array. No markdown. No explanation. No backticks. Just th
 [{"q":"Question here?","options":["Correct answer","Wrong 1","Wrong 2","Wrong 3"]},...]
 Exactly 10 items. Nothing else.`;
 
-  try {
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 1.0, maxOutputTokens: 2048 } }),
-      }
-    );
-    if (!geminiRes.ok) {
-      const err = await geminiRes.text();
-      return res.status(502).json({ error: `Gemini API error: ${err}` });
+  const geminiRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 1.0, maxOutputTokens: 2048 } }),
     }
-    const data = await geminiRes.json();
-    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json|```/gi, '').trim();
-    const raw = JSON.parse(text);
-    const questions = raw.slice(0, 10).map(q => {
-      const opts = (q.options || q.answers || []).map((t, i) => ({
-        text: typeof t === 'string' ? t : t.text || t,
-        isCorrect: i === 0,
+  );
+  if (!geminiRes.ok) {
+    const err = await geminiRes.text();
+    throw new Error(`Gemini API error: ${err}`);
+  }
+  const data = await geminiRes.json();
+  const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').replace(/```json|```/gi, '').trim();
+  const raw = JSON.parse(text);
+  return raw.slice(0, 10).map(q => {
+    const questionText = q.q || q.question;
+    const opts = (q.options || q.answers || []).map((t, i) => ({
+      text: typeof t === 'string' ? t : t.text || t,
+      isCorrect: i === 0,
+    }));
+    return { question: questionText, options: opts };
+  }).filter(q => q.question && q.options.length === 4);
+}
+
+router.post('/generate', authMiddleware, async (req, res) => {
+  const { category } = req.body;
+  const userId = req.user.id;
+  const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Gemini API key not configured on server.' });
+  if (!category) return res.status(400).json({ error: 'Category required' });
+
+  try {
+    // 1. CACHE FIRST: try to find 10 unseen cached questions for this user/category
+    const cachedRes = await pool.query(`
+      SELECT cq.id, cq.question, cq.options
+      FROM cached_questions cq
+      WHERE cq.category = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM user_seen_questions usq
+          WHERE usq.user_id = $2 AND usq.question_id = cq.id
+        )
+      ORDER BY RANDOM()
+      LIMIT 10
+    `, [category, userId]);
+
+    if (cachedRes.rows.length >= 10) {
+      const ids = cachedRes.rows.map(r => r.id);
+      await pool.query(`
+        INSERT INTO user_seen_questions (user_id, question_id)
+        SELECT $1, unnest($2::int[])
+        ON CONFLICT DO NOTHING
+      `, [userId, ids]);
+      const questions = cachedRes.rows.map(r => ({
+        question: r.question,
+        options: shuffleOptions(r.options),
       }));
-      for (let i = opts.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [opts[i], opts[j]] = [opts[j], opts[i]];
+      return res.json({ questions, source: 'cache' });
+    }
+
+    // 2. CACHE MISS or partial: generate fresh from Gemini
+    const generated = await callGemini(category, apiKey);
+
+    // 3. Save each generated question to cache (dedupe by hash) and collect IDs
+    const finalIds = [];
+    const finalQuestions = [];
+    for (const q of generated) {
+      const hash = hashQuestion(q.question);
+      const insertRes = await pool.query(`
+        INSERT INTO cached_questions (category, question, options, question_hash)
+        VALUES ($1, $2, $3::jsonb, $4)
+        ON CONFLICT (question_hash) DO UPDATE SET question_hash = EXCLUDED.question_hash
+        RETURNING id, options
+      `, [category, q.question, JSON.stringify(q.options), hash]);
+      const row = insertRes.rows[0];
+      finalIds.push(row.id);
+      finalQuestions.push({
+        question: q.question,
+        options: shuffleOptions(row.options),
+      });
+    }
+
+    // 4. Top up from existing cached unseen if Gemini gave us <10 (rare edge case)
+    if (finalQuestions.length < 10 && cachedRes.rows.length > 0) {
+      const existingIds = new Set(finalIds);
+      for (const r of cachedRes.rows) {
+        if (finalQuestions.length >= 10) break;
+        if (existingIds.has(r.id)) continue;
+        finalIds.push(r.id);
+        finalQuestions.push({
+          question: r.question,
+          options: shuffleOptions(r.options),
+        });
       }
-      return { question: q.q || q.question, options: opts };
-    });
-    res.json({ questions });
+    }
+
+    // 5. Mark all served questions as seen for this user
+    if (finalIds.length) {
+      await pool.query(`
+        INSERT INTO user_seen_questions (user_id, question_id)
+        SELECT $1, unnest($2::int[])
+        ON CONFLICT DO NOTHING
+      `, [userId, finalIds]);
+    }
+
+    res.json({ questions: finalQuestions, source: 'gemini' });
   } catch (e) {
-    console.error('Gemini generate error:', e);
+    console.error('Generate error:', e);
+
+    // 6. LAST RESORT: if Gemini failed (e.g. quota), serve from cache even if some seen
+    try {
+      const fallbackRes = await pool.query(`
+        SELECT id, question, options FROM cached_questions
+        WHERE category = $1
+        ORDER BY RANDOM() LIMIT 10
+      `, [category]);
+      if (fallbackRes.rows.length >= 10) {
+        const questions = fallbackRes.rows.map(r => ({
+          question: r.question,
+          options: shuffleOptions(r.options),
+        }));
+        return res.json({ questions, source: 'cache-fallback' });
+      }
+    } catch (_) {}
+
     res.status(500).json({ error: e.message || 'Failed to generate questions' });
   }
 });
