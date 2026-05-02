@@ -186,6 +186,18 @@ export default function App() {
   /* streak */
   const [streakBonusNotif, setStreakBonusNotif] = useState(0);
 
+  /* ads & greed */
+  const MAX_ADS = 5;
+  const [adWatching, setAdWatching] = useState(false);
+  const [adCountdown, setAdCountdown] = useState(5);
+  const [adWatchesToday, setAdWatchesToday] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('qr_ads') || '{}');
+      return s.date === new Date().toDateString() ? (s.count || 0) : 0;
+    } catch { return 0; }
+  });
+  const [milestone, setMilestone] = useState(null);
+
   /* derived */
   const pts = user?.points || 0;
   const ptsRupees = +(pts / 10).toFixed(2);

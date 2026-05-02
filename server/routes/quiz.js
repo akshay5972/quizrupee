@@ -122,4 +122,31 @@ router.get('/category-stats', authMiddleware, async (req, res) => {
   }
 });
 
+router.post('/watch-ad', authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+  const BONUS = 15;
+  const rupeesBonus = +(BONUS / 10).toFixed(2);
+  try {
+    await pool.query(
+      'UPDATE users SET points = points + $1, total_earned = total_earned + $2 WHERE id = $3',
+      [BONUS, rupeesBonus, userId]
+    );
+    const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const u = result.rows[0];
+    res.json({
+      success: true, bonus: BONUS,
+      user: {
+        id: u.id, name: u.name, email: u.email,
+        points: u.points, total_earned: u.total_earned,
+        total_withdrawn: u.total_withdrawn, is_admin: u.is_admin,
+        referral_code: u.referral_code, referral_count: u.referral_count || 0,
+        streak: u.streak || 0, longest_streak: u.longest_streak || 0,
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 export default router;
