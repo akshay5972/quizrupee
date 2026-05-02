@@ -13,6 +13,7 @@ import leaderboardRoutes from './routes/leaderboard.js';
 import profileRoutes from './routes/profile.js';
 import helpRoutes from './routes/help.js';
 import followsRoutes from './routes/follows.js';
+import messagesRoutes from './routes/messages.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -29,6 +30,7 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/help', helpRoutes);
 app.use('/api/follows', followsRoutes);
+app.use('/api/messages', messagesRoutes);
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 // In production, serve built React files

@@ -217,6 +217,15 @@ export default function App() {
   const [viewProfile, setViewProfile] = useState(null);
   const [viewBusy, setViewBusy] = useState(false);
 
+  /* chat */
+  const [chatWith, setChatWith] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const chatBottomRef = useRef(null);
+
   /* referral */
   const [refCode] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
   const [refCopied, setRefCopied] = useState(false);
@@ -378,6 +387,66 @@ export default function App() {
     }
     setViewBusy(false);
   };
+
+  /* ── CHAT handlers ── */
+  const fetchMessages = async (otherId) => {
+    try {
+      const d = await api(`/messages/${otherId}`);
+      setChatMessages(d.messages || []);
+      setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
+      // clear unread for this user
+      setUnreadCounts(c => { const n = { ...c }; delete n[otherId]; return n; });
+    } catch {}
+  };
+
+  const openChat = (friend) => {
+    setChatWith(friend);
+    setChatMessages([]);
+    setChatInput("");
+    setChatLoading(true);
+    setPage("chat");
+    api(`/messages/${friend.id}`)
+      .then(d => { setChatMessages(d.messages || []); setChatLoading(false);
+        setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80); })
+      .catch(() => setChatLoading(false));
+    setUnreadCounts(c => { const n = { ...c }; delete n[String(friend.id)]; return n; });
+  };
+
+  const sendMessage = async () => {
+    if (!chatInput.trim() || chatSending || !chatWith) return;
+    const body = chatInput.trim();
+    setChatInput("");
+    setChatSending(true);
+    // optimistic
+    const tempMsg = { id: Date.now(), sender_id: user.id, receiver_id: chatWith.id, body, is_read: false, created_at: new Date().toISOString() };
+    setChatMessages(m => [...m, tempMsg]);
+    setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 40);
+    try {
+      const d = await api(`/messages/${chatWith.id}`, { method: "POST", body: { body } });
+      setChatMessages(m => m.map(x => x.id === tempMsg.id ? d.message : x));
+    } catch (e) {
+      setChatMessages(m => m.filter(x => x.id !== tempMsg.id));
+      setChatInput(body);
+      alert(e.message);
+    }
+    setChatSending(false);
+  };
+
+  /* 5-second chat polling */
+  useEffect(() => {
+    if (page !== "chat" || !chatWith) return;
+    const iv = setInterval(() => fetchMessages(chatWith.id), 5000);
+    return () => clearInterval(iv);
+  }, [page, chatWith?.id]);
+
+  /* unread counts polling — run every 10s when on friends page */
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => api("/messages/unread").then(d => setUnreadCounts(d.counts || {})).catch(() => {});
+    refresh();
+    const iv = setInterval(refresh, 10000);
+    return () => clearInterval(iv);
+  }, [user?.id]);
 
   const adminResolveReport = async (id, status) => {
     try {
@@ -1174,32 +1243,106 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
                     {friendsTab === "followers" && <>No followers yet. Share QuizRupee with friends!</>}
                   </div>
                 )}
-                {friendsList.map(u => (
+                {friendsList.map(u => {
+                  const isMutual = u.i_follow && u.follows_me;
+                  const hasUnread = unreadCounts[String(u.id)] > 0;
+                  return (
                   <div key={u.id} onClick={() => openUserProfile(u.id)} className="card" style={{ marginBottom: 8, padding: 12, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
-                    <Avatar seed={u.avatar_seed} gender={u.gender} size={46} />
+                    <div style={{ position: "relative" }}>
+                      <Avatar seed={u.avatar_seed} gender={u.gender} size={46} />
+                      {hasUnread && <div style={{ position: "absolute", top: -2, right: -2, width: 12, height: 12, borderRadius: "50%", background: "#ef4444", border: "2px solid #09091a" }} />}
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 900, fontSize: 14, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
                       <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>
                         {u.country && <>📍 {u.country} · </>}{u.follower_count} followers
-                        {friendsTab !== "friends" && u.i_follow && u.follows_me && <span style={{ color: "#a855f7", marginLeft: 6, fontWeight: 800 }}>· friends</span>}
+                        {friendsTab !== "friends" && isMutual && <span style={{ color: "#a855f7", marginLeft: 6, fontWeight: 800 }}>· friends</span>}
                         {friendsTab === "followers" && !u.i_follow && <span style={{ color: "#f59e0b", marginLeft: 6, fontWeight: 800 }}>· follow back</span>}
                       </div>
                     </div>
-                    {friendsTab === "followers" && !u.i_follow ? (
-                      <button onClick={e => { e.stopPropagation(); toggleFollow(u, false); }}
-                        style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#a855f7,#7c3aed)", color: "#fff", fontWeight: 900, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-                        + Follow
-                      </button>
-                    ) : (
-                      <button onClick={e => { e.stopPropagation(); toggleFollow(u, u.i_follow); }}
-                        style={{ padding: "8px 12px", borderRadius: 10, border: "1.5px solid #1a2238", background: "transparent", color: u.i_follow ? "#888" : "#a855f7", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-                        {u.i_follow ? "Following" : "+ Follow"}
-                      </button>
-                    )}
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      {isMutual && (
+                        <button onClick={e => { e.stopPropagation(); openChat(u); }}
+                          style={{ width: 34, height: 34, borderRadius: "50%", border: "none", background: hasUnread ? "#ef4444" : "rgba(168,85,247,.18)", color: hasUnread ? "#fff" : "#a855f7", fontSize: 15, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          💬
+                        </button>
+                      )}
+                      {friendsTab === "followers" && !u.i_follow ? (
+                        <button onClick={e => { e.stopPropagation(); toggleFollow(u, false); }}
+                          style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#a855f7,#7c3aed)", color: "#fff", fontWeight: 900, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                          + Follow
+                        </button>
+                      ) : (
+                        <button onClick={e => { e.stopPropagation(); toggleFollow(u, u.i_follow); }}
+                          style={{ padding: "8px 12px", borderRadius: 10, border: "1.5px solid #1a2238", background: "transparent", color: u.i_follow ? "#888" : "#a855f7", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                          {u.i_follow ? "Following" : "+ Follow"}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
               </>
             )}
+          </div>
+        )}
+
+        {/* ══ CHAT ══ */}
+        {page === "chat" && chatWith && (
+          <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)", animation: "fadeUp .25s ease" }}>
+            {/* chat header */}
+            <div style={{ padding: "12px 15px", borderBottom: "1px solid #141428", background: "#09091a", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+              <button onClick={() => { setPage("friends"); setFriendsTab("friends"); }} style={{ background: "none", border: "none", color: "#888", fontSize: 20, cursor: "pointer", padding: 0 }}>←</button>
+              <Avatar seed={chatWith.avatar_seed} gender={chatWith.gender} size={38} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 14, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{chatWith.name}</div>
+                <div style={{ fontSize: 10, color: "#a855f7", fontWeight: 700 }}>✦ Friends</div>
+              </div>
+            </div>
+
+            {/* messages area */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 8px", display: "flex", flexDirection: "column", gap: 8 }}>
+              {chatLoading && <div style={{ color: "#444", fontSize: 12, textAlign: "center", padding: 20 }}>Loading messages...</div>}
+              {!chatLoading && chatMessages.length === 0 && (
+                <div style={{ color: "#333", fontSize: 12, textAlign: "center", padding: "40px 0", lineHeight: 1.7 }}>
+                  No messages yet.<br/>Say hello to {chatWith.name}! 👋
+                </div>
+              )}
+              {chatMessages.map(msg => {
+                const mine = msg.sender_id === user.id;
+                return (
+                  <div key={msg.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                    <div style={{ maxWidth: "76%", padding: "9px 13px", borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                      background: mine ? "linear-gradient(135deg,#a855f7,#7c3aed)" : "#141428",
+                      color: "#fff", fontSize: 14, lineHeight: 1.45, wordBreak: "break-word",
+                      boxShadow: mine ? "0 2px 8px rgba(168,85,247,.3)" : "none" }}>
+                      {msg.body}
+                      <div style={{ fontSize: 9, color: mine ? "rgba(255,255,255,.5)" : "#333", marginTop: 3, textAlign: mine ? "right" : "left" }}>
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {mine && <span style={{ marginLeft: 4 }}>{msg.is_read ? " ✓✓" : " ✓"}</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* input row */}
+            <div style={{ padding: "10px 12px", borderTop: "1px solid #141428", background: "#09091a", display: "flex", gap: 8, flexShrink: 0 }}>
+              <input
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                placeholder="Type a message..."
+                maxLength={500}
+                style={{ flex: 1, padding: "11px 14px", background: "#0c0c1e", border: "1.5px solid #1a2238", borderRadius: 22, color: "#e0e0e0", fontSize: 14, fontFamily: "inherit", outline: "none" }}
+              />
+              <button onClick={sendMessage} disabled={chatSending || !chatInput.trim()}
+                style={{ width: 44, height: 44, borderRadius: "50%", border: "none", background: chatSending || !chatInput.trim() ? "#1a1a30" : "linear-gradient(135deg,#a855f7,#7c3aed)", color: "#fff", fontSize: 18, cursor: chatSending || !chatInput.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {chatSending ? "…" : "➤"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -1500,11 +1643,20 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
 
       {/* ── NAV BAR ── */}
       <nav className="nav">
-        {navItems.map(([id, ic, lbl]) => (
-          <button key={id} className={`nb ${page === id ? "on" : ""}`} onClick={() => { if (!quiz) { setResult(null); setPage(id); } }} style={{ opacity: quiz ? .35 : 1 }}>
-            <span>{ic}</span><small>{lbl}</small>
-          </button>
-        ))}
+        {navItems.map(([id, ic, lbl]) => {
+          const totalUnread = id === "friends" ? Object.values(unreadCounts).reduce((s, v) => s + v, 0) : 0;
+          return (
+            <button key={id} className={`nb ${(page === id || (page === "chat" && id === "friends")) ? "on" : ""}`} onClick={() => { if (!quiz) { setResult(null); setPage(id); } }} style={{ opacity: quiz ? .35 : 1, position: "relative" }}>
+              <span>{ic}</span>
+              {totalUnread > 0 && (
+                <span style={{ position: "absolute", top: 4, right: "50%", transform: "translateX(10px)", background: "#ef4444", color: "#fff", fontSize: 9, fontWeight: 900, borderRadius: "50%", width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: "1.5px solid #09091a" }}>
+                  {totalUnread > 9 ? "9+" : totalUnread}
+                </span>
+              )}
+              <small>{lbl}</small>
+            </button>
+          );
+        })}
       </nav>
 
       {/* ── AD WATCHING COUNTDOWN ── */}
@@ -1590,9 +1742,15 @@ Free to play · No repeats per category<br />1 pt per correct · 1000 pts = ₹1
                   </button>
                 )}
                 {viewProfile.i_follow && viewProfile.follows_me && !viewProfile.is_me && (
-                  <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(168,85,247,.1)", border: "1px solid #a855f733", color: "#a855f7", fontSize: 11, fontWeight: 700, textAlign: "center" }}>
-                    ✦ You two are friends
-                  </div>
+                  <>
+                    <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(168,85,247,.1)", border: "1px solid #a855f733", color: "#a855f7", fontSize: 11, fontWeight: 700, textAlign: "center" }}>
+                      ✦ You two are friends
+                    </div>
+                    <button onClick={() => { setViewProfile(null); openChat(viewProfile); }}
+                      style={{ width: "100%", marginTop: 8, padding: 13, borderRadius: 12, border: "none", background: "linear-gradient(135deg,#3b82f6,#1d4ed8)", color: "#fff", fontWeight: 900, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                      💬 Message
+                    </button>
+                  </>
                 )}
               </>
             )}

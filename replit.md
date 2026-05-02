@@ -105,4 +105,15 @@ vite.config.js          # Proxy /api/* → localhost:3001
 - `GET /api/profile/:userId` returns `i_follow`, `follows_me`, `follower_count`, `following_count`, `is_me` so the UI can render the right Follow/Unfollow CTA.
 - Frontend: bottom nav has new **Friends** tab (👥) with sub-tabs Friends / Following / Followers / Find People (debounced search). Tapping any user opens a profile modal with stats and Follow/Unfollow. Profile page also shows a 3-stat bar (Friends / Following / Followers) that links to the Friends tab.
 
-Roadmap (not yet built): Ship 3 chat (mutual-only, 5s polling, 50-msg cap, EN+Hindi profanity filter), Ship 4 one-way block.
+## Chat (Ship 3)
+
+- Mutual-only: only friends (mutual follows) can open a chat. Non-mutuals get 403.
+- `messages` table: (id, sender_id, receiver_id, body, is_read, created_at). Self-chat CHECK. Indices on conversation pair + receiver read status.
+- Endpoints (`/api/messages`, auth-required):
+  - `GET /unread` — unread counts grouped by sender_id
+  - `GET /:userId` — fetch conversation (last 50, oldest-first). Marks incoming as read.
+  - `POST /:userId` — send (mutual check, 500-char limit, profanity filter, 50-msg sliding window via transactional DELETE)
+- `server/profanity.js` — EN + Hindi word list, compiled to one regex at startup. `filterProfanity(text)` replaces matches with `***`. Applied server-side before storing.
+- Frontend: chat opens as `page === "chat"` (full-screen). Back arrow returns to Friends tab. Bubbles: mine = purple right-aligned + ✓/✓✓ receipt, theirs = dark left-aligned. Optimistic send (temp message, replaced on confirm, rolled back on error). 5s polling interval while chat is open. Unread red dot on avatar in friends list. Red badge counter on Friends nav tab. 💬 button on friend cards (mutual only) + blue 💬 Message button inside profile modal for friends.
+
+Roadmap (not yet built): Ship 4 one-way block.

@@ -96,6 +96,19 @@ export async function initDB() {
     );
     CREATE INDEX IF NOT EXISTS idx_follows_followee ON follows(followee_id);
     CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
+    CREATE TABLE IF NOT EXISTS messages (
+      id          SERIAL PRIMARY KEY,
+      sender_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body        TEXT NOT NULL,
+      is_read     BOOLEAN DEFAULT FALSE,
+      created_at  TIMESTAMP DEFAULT NOW(),
+      CHECK (sender_id <> receiver_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_convo ON messages(
+      LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id), created_at DESC
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read);
   `);
   console.log('Database initialized');
 }
