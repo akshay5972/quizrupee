@@ -1,0 +1,29 @@
+{
+  "name": "QuizRupee — Answer · Learn · Earn",
+  "short_name": "QuizRupee",
+  "description": "Answer quiz questions, earn real rupees. 1 point per correct answer, withdraw via UPI at ₹100 minimum.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#e94560",
+  "background_color": "#07070e",
+  "lang": "en-IN",
+  "categories": ["games", "education", "entertainment"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
