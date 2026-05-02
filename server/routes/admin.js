@@ -17,7 +17,7 @@ const upload = multer({
   },
 });
 
-const VALID_CATEGORIES = ['sports','entertainment','science','space','politics','history','maths','geography','animals'];
+const VALID_CATEGORIES = ['sports','entertainment','science','space','politics','history','maths','geography','animals','puzzle','tricky','logical'];
 
 function hashQuestion(category, text) {
   const norm = `${category}:${text.toLowerCase().trim().replace(/\s+/g, ' ')}`;

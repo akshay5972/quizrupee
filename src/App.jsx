@@ -11,6 +11,9 @@ const CATEGORIES = [
   { id: "maths",         label: "Maths",          icon: "➗", color: "#14B8A6" },
   { id: "geography",     label: "Geography",      icon: "🌍", color: "#16A34A" },
   { id: "animals",       label: "Animals",        icon: "🐾", color: "#F97316" },
+  { id: "puzzle",        label: "Puzzle",         icon: "🧩", color: "#EC4899" },
+  { id: "tricky",        label: "Tricky",         icon: "🤔", color: "#FACC15" },
+  { id: "logical",       label: "Logical",        icon: "🧠", color: "#06B6D4" },
 ];
 const MEDAL = ["🥇", "🥈", "🥉"];
 /* ── API HELPER ─────────────────────────────────────────────────────────── */
